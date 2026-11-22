@@ -32,10 +32,48 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, timeoutMessage: s
   }
 }
 
+function getGeminiErrorDetails(err: unknown): { status: number; raw: string } {
+  const pending: unknown[] = [err];
+  const seen = new Set<object>();
+  const messages: string[] = [];
+  let status = 0;
+
+  while (pending.length > 0 && seen.size < 8) {
+    const current = pending.shift();
+    if (typeof current === 'string') {
+      if (current.trim()) messages.push(current.trim());
+      continue;
+    }
+    if (!current || typeof current !== 'object' || seen.has(current)) continue;
+
+    seen.add(current);
+    const record = current as Record<string, unknown>;
+    const response = record.response && typeof record.response === 'object'
+      ? record.response as Record<string, unknown>
+      : undefined;
+    const candidates = [record.status, record.statusCode, response?.status];
+    for (const candidate of candidates) {
+      const parsed = Number(candidate);
+      if (!status && Number.isInteger(parsed) && parsed >= 400 && parsed <= 599) {
+        status = parsed;
+      }
+    }
+
+    if (typeof record.message === 'string' && record.message.trim()) messages.push(record.message.trim());
+    if (typeof record.code === 'string' || typeof record.code === 'number') messages.push(String(record.code));
+    pending.push(record.cause, record.error, response, response?.body, response?.data);
+  }
+
+  const raw = messages.join(' ').trim() || (err instanceof Error ? err.message : String(err || ''));
+  if (!status) {
+    const match = raw.match(/\b(?:HTTP\s*)?([45]\d{2})\b/i);
+    if (match) status = Number(match[1]);
+  }
+  return { status, raw };
+}
+
 export function formatGeminiError(err: unknown): string {
-  const error = err && typeof err === 'object' ? (err as { status?: unknown; statusCode?: unknown; message?: unknown }) : {};
-  const status = Number(error.status ?? error.statusCode);
-  const raw = err instanceof Error ? err.message : typeof error.message === 'string' ? error.message : String(err || '');
+  const { status, raw } = getGeminiErrorDetails(err);
   const lower = raw.toLowerCase();
 
   if (lower.includes('gemini_api_key no está configurada') || lower.includes('gemini_api_key is not configured')) {
@@ -51,17 +89,26 @@ export function formatGeminiError(err: unknown): string {
     return 'El modelo de Gemini solicitado no está disponible para esta clave o API (404).';
   }
   if (
-    status >= 500 ||
+    [500, 502, 503, 504].includes(status) ||
+    lower.includes('500') ||
+    lower.includes('502') ||
     lower.includes('503') ||
     lower.includes('504') ||
+    lower.includes('bad gateway') ||
+    lower.includes('internal server error') ||
+    lower.includes('gateway timeout') ||
+    lower.includes('service unavailable') ||
     lower.includes('unavailable') ||
     lower.includes('high demand') ||
     lower.includes('fetch failed') ||
+    lower.includes('failed to fetch') ||
     lower.includes('econnreset') ||
     lower.includes('enotfound') ||
     lower.includes('timeout')
   ) {
-    return 'No se pudo conectar con Gemini temporalmente (503). Reintentá en unos segundos.';
+    const matchingStatus = lower.match(/\b(500|502|503|504)\b/);
+    const code = status || (matchingStatus ? Number(matchingStatus[1]) : 503);
+    return `Gemini está temporalmente no disponible (HTTP ${code}). Reintentá en unos segundos.`;
   }
   if (status === 400 || lower.includes('invalid_argument')) {
     return 'Gemini rechazó la solicitud (400). Revisá el modelo y el formato del mensaje.';
@@ -70,9 +117,7 @@ export function formatGeminiError(err: unknown): string {
 }
 
 export function getGeminiHttpStatus(err: unknown): number {
-  const error = err && typeof err === 'object' ? (err as { status?: unknown; statusCode?: unknown; message?: unknown }) : {};
-  const status = Number(error.status ?? error.statusCode);
-  const raw = err instanceof Error ? err.message : typeof error.message === 'string' ? error.message : String(err || '');
+  const { status, raw } = getGeminiErrorDetails(err);
   const lower = raw.toLowerCase();
 
   if ([401, 403].includes(status) || lower.includes('api_key_invalid') || lower.includes('permission_denied') || lower.includes('401') || lower.includes('403')) return 401;
@@ -80,12 +125,15 @@ export function getGeminiHttpStatus(err: unknown): number {
   if (status === 429 || lower.includes('429') || lower.includes('resource_exhausted')) return 429;
   if (status === 404 || lower.includes('404') || lower.includes('not_found')) return 502;
   if (
-    status >= 500 ||
+    [408, 500, 502, 503, 504].includes(status) ||
+    lower.includes('500') ||
+    lower.includes('502') ||
     lower.includes('503') ||
     lower.includes('504') ||
     lower.includes('unavailable') ||
     lower.includes('high demand') ||
     lower.includes('fetch failed') ||
+    lower.includes('failed to fetch') ||
     lower.includes('econnreset') ||
     lower.includes('enotfound') ||
     lower.includes('timeout')
@@ -95,30 +143,40 @@ export function getGeminiHttpStatus(err: unknown): number {
 }
 
 function isTransientGeminiError(err: unknown): boolean {
-  const raw = (err instanceof Error ? err.message : String(err || '')).toLowerCase();
+  const { status, raw } = getGeminiErrorDetails(err);
+  const lower = raw.toLowerCase();
   if (
-    raw.includes('400') ||
-    raw.includes('invalid_argument') ||
-    raw.includes('api_key_invalid') ||
-    raw.includes('permission_denied') ||
-    raw.includes('403') ||
-    raw.includes('404') ||
-    raw.includes('not_found')
+    [400, 401, 403, 404].includes(status) ||
+    lower.includes('invalid_argument') ||
+    lower.includes('api_key_invalid') ||
+    lower.includes('permission_denied') ||
+    lower.includes('403') ||
+    lower.includes('404') ||
+    lower.includes('not_found')
   ) {
     return false;
   }
   return (
-    raw.includes('503') ||
-    raw.includes('504') ||
-    raw.includes('429') ||
-    raw.includes('unavailable') ||
-    raw.includes('high demand') ||
-    raw.includes('resource_exhausted') ||
-    raw.includes('deadline_exceeded') ||
-    raw.includes('tardó demasiado') ||
-    raw.includes('timeout') ||
-    raw.includes('fetch failed') ||
-    raw.includes('econnreset')
+    [408, 429, 500, 502, 503, 504].includes(status) ||
+    lower.includes('408') ||
+    lower.includes('429') ||
+    lower.includes('500') ||
+    lower.includes('502') ||
+    lower.includes('503') ||
+    lower.includes('504') ||
+    lower.includes('bad gateway') ||
+    lower.includes('internal server error') ||
+    lower.includes('gateway timeout') ||
+    lower.includes('service unavailable') ||
+    lower.includes('unavailable') ||
+    lower.includes('high demand') ||
+    lower.includes('resource_exhausted') ||
+    lower.includes('deadline_exceeded') ||
+    lower.includes('tardó demasiado') ||
+    lower.includes('timeout') ||
+    lower.includes('fetch failed') ||
+    lower.includes('failed to fetch') ||
+    lower.includes('econnreset')
   );
 }
 
