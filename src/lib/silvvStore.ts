@@ -1720,6 +1720,7 @@ async function processChatTurn(params: {
     ? 'organized'
     : 'analyzed';
 
+  const savedAttachments = msgAttachments.slice(0, 20);
   const assistantMsgId = nextNumericId();
   const assistantMetadata: MessageItem['metadata'] = {
     classifications: analysis.classifications,
@@ -1736,7 +1737,7 @@ async function processChatTurn(params: {
   writePromises.push(
     updateSubdoc(uid, 'messages', String(userMsgId), {
       processingStatus: finalMsgStatus,
-      attachments: msgAttachments.slice(0, 20),
+      attachments: savedAttachments,
     }),
     createSubdoc(uid, 'messages', String(assistantMsgId), {
       id: assistantMsgId,
@@ -1773,6 +1774,7 @@ async function processChatTurn(params: {
   return {
     finalMsgStatus,
     assistantMsg,
+    userAttachments: savedAttachments,
     savedMemories,
     actions: executedOrPendingActions,
   };
@@ -2970,7 +2972,7 @@ export async function dispatchSilvvRequest<T>(rawPath: string, options: RequestI
         processingStatus: result.finalMsgStatus,
         errorMessage: null,
         metadata: linkUrl ? { linkUrl } : {},
-        attachments: [],
+        attachments: result.userAttachments,
         createdAt: new Date().toISOString(),
       };
 
