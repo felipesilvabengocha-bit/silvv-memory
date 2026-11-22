@@ -763,6 +763,7 @@ interface GeminiChatAnalysis {
   proposedNoteAction: {
     action: 'none' | 'create' | 'propose_edit';
     targetNoteId: number | null;
+    folderCategory: 'Estudios' | 'Vida diaria';
     folderName: string;
     title: string;
     content: string;
@@ -1190,23 +1191,47 @@ async function processChatTurn(params: {
           n.content.trim().toLowerCase() === noteContent.toLowerCase(),
       );
       if (!duplicateNote) {
-        let targetNoteFolderId: number | null = null;
-        if (na.folderName?.trim()) {
-          const fn = na.folderName.trim();
-          const existingNf = activeNoteFolders.find((f) => f.name.toLowerCase() === fn.toLowerCase());
-          if (existingNf) {
-            targetNoteFolderId = existingNf.id;
+        const folderCategory = na.folderCategory === 'Estudios' ? 'Estudios' : 'Vida diaria';
+        let targetNoteFolderId =
+          activeNoteFolders.find(
+            (folder) => folder.parentId == null && normalizeName(folder.name) === normalizeName(folderCategory),
+          )?.id ?? null;
+
+        if (targetNoteFolderId === null) {
+          targetNoteFolderId = nextNumericId();
+          writePromises.push(
+            createSubdoc(uid, 'noteFolders', String(targetNoteFolderId), {
+              id: targetNoteFolderId,
+              parentId: null,
+              name: folderCategory,
+              color: folderCategory === 'Estudios' ? '#8B5CF6' : '#3B82F6',
+              deletedAt: null,
+            }),
+          );
+        }
+
+        const rawSubfolderName = (na.folderName || '').trim();
+        const subfolderName = rawSubfolderName.split(/[\\/]/).pop()?.trim().slice(0, 48) || '';
+        if (subfolderName && normalizeName(subfolderName) !== normalizeName(folderCategory)) {
+          const existingSubfolder = activeNoteFolders.find(
+            (folder) =>
+              folder.parentId === targetNoteFolderId &&
+              normalizeName(folder.name) === normalizeName(subfolderName),
+          );
+          if (existingSubfolder) {
+            targetNoteFolderId = existingSubfolder.id;
           } else {
-            targetNoteFolderId = nextNumericId();
+            const subfolderId = nextNumericId();
             writePromises.push(
-              createSubdoc(uid, 'noteFolders', String(targetNoteFolderId), {
-                id: targetNoteFolderId,
-                parentId: null,
-                name: fn.slice(0, 80),
-                color: '#7C3AED',
+              createSubdoc(uid, 'noteFolders', String(subfolderId), {
+                id: subfolderId,
+                parentId: targetNoteFolderId,
+                name: subfolderName,
+                color: folderCategory === 'Estudios' ? '#8B5CF6' : '#3B82F6',
                 deletedAt: null,
               }),
             );
+            targetNoteFolderId = subfolderId;
           }
         }
         const noteId = nextNumericId();
@@ -1994,6 +2019,10 @@ export async function dispatchSilvvRequest<T>(rawPath: string, options: RequestI
   // ---- DASHBOARD & BRIEFING ----
   if (pathname === '/api/dashboard' && method === 'GET') {
     return (await getDashboard(uid)) as T;
+  }
+
+  if (pathname === '/api/ai/note-organization' && method === 'POST') {
+    return (await callServerEndpoint('/api/ai/note-organization', 'POST', body)) as T;
   }
 
   if (pathname === '/api/dashboard/briefing' && method === 'POST') {

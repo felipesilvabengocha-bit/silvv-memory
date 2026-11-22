@@ -111,6 +111,7 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [quickChatText, setQuickChatText] = useState<string | null>(null);
   const [isDark, setIsDark] = useState(true);
+  const [mobileKeyboardOpen, setMobileKeyboardOpen] = useState(false);
 
   const lastAutoSyncUidRef = useRef<string | null>(null);
 
@@ -138,6 +139,39 @@ export default function App() {
   useEffect(() => {
     applyTheme(preferences?.theme);
   }, [preferences?.theme, applyTheme]);
+
+  useEffect(() => {
+    const visualViewport = window.visualViewport;
+    const updateViewport = () => {
+      const height = visualViewport?.height ?? window.innerHeight;
+      document.documentElement.style.setProperty('--silvv-visual-viewport-height', `${Math.round(height)}px`);
+
+      const activeElement = document.activeElement;
+      const hasTextInputFocus =
+        activeElement instanceof HTMLElement &&
+        activeElement.matches('input, textarea, [contenteditable="true"]');
+      setMobileKeyboardOpen(
+        window.matchMedia('(max-width: 1023px)').matches && hasTextInputFocus,
+      );
+    };
+    const updateAfterFocus = () => window.requestAnimationFrame(updateViewport);
+
+    updateViewport();
+    window.addEventListener('resize', updateViewport);
+    visualViewport?.addEventListener('resize', updateViewport);
+    visualViewport?.addEventListener('scroll', updateViewport);
+    document.addEventListener('focusin', updateViewport);
+    document.addEventListener('focusout', updateAfterFocus);
+
+    return () => {
+      window.removeEventListener('resize', updateViewport);
+      visualViewport?.removeEventListener('resize', updateViewport);
+      visualViewport?.removeEventListener('scroll', updateViewport);
+      document.removeEventListener('focusin', updateViewport);
+      document.removeEventListener('focusout', updateAfterFocus);
+      document.documentElement.style.removeProperty('--silvv-visual-viewport-height');
+    };
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -253,7 +287,9 @@ export default function App() {
   return (
     <MotionConfig reducedMotion="user">
       <SilvvErrorBoundary>
-        <div className="min-h-screen bg-zinc-50 dark:bg-[#09090B] silvv-ambient-bg text-zinc-900 dark:text-zinc-100 flex">
+        <div
+          className={`${isFullBleedChat && mobileKeyboardOpen ? 'h-[var(--silvv-visual-viewport-height,100dvh)] min-h-0 overflow-hidden' : 'min-h-screen'} bg-zinc-50 dark:bg-[#09090B] silvv-ambient-bg text-zinc-900 dark:text-zinc-100 flex`}
+        >
           {/* Desktop Sidebar */}
           <aside className="hidden lg:flex lg:w-64 lg:flex-col lg:fixed lg:inset-y-0 glass-panel border-r border-zinc-200/70 dark:border-white/10 px-4 py-5 justify-between">
             <div className="space-y-6">
@@ -344,7 +380,7 @@ export default function App() {
               onClick={() => setMobileNavOpen(false)}
             >
               <aside
-                className="w-72 h-full glass-elevated border-r border-zinc-200/70 dark:border-white/10 p-5 flex flex-col justify-between"
+                className="w-72 h-full glass-elevated border-r border-zinc-200/70 dark:border-white/10 p-5 flex flex-col justify-between animate-silvv-panel-in"
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="space-y-6 overflow-y-auto">
@@ -398,8 +434,10 @@ export default function App() {
           )}
 
           {/* Main Content Area */}
-          <div className="flex-1 lg:pl-64 flex flex-col min-w-0 min-h-screen">
-            <header className="h-14 border-b border-zinc-200/70 dark:border-white/10 glass-panel sticky top-0 z-30 px-4 sm:px-8 flex items-center justify-between gap-4">
+          <div
+            className={`flex-1 lg:pl-64 flex flex-col min-w-0 ${isFullBleedChat && mobileKeyboardOpen ? 'h-full min-h-0' : 'min-h-screen'}`}
+          >
+            <header className="h-[calc(3.5rem+env(safe-area-inset-top))] shrink-0 border-b border-zinc-200/70 dark:border-white/10 glass-panel sticky top-0 z-30 px-4 pt-[env(safe-area-inset-top)] sm:px-8 flex items-center justify-between gap-4">
               <div className="flex items-center gap-3 min-w-0">
                 <button
                   type="button"
@@ -454,7 +492,7 @@ export default function App() {
             <main
               className={
                 isFullBleedChat
-                  ? 'flex-1 w-full h-[calc(100dvh-3.5rem-3.25rem-env(safe-area-inset-bottom))] lg:h-[calc(100dvh-3.5rem)] overflow-hidden'
+                  ? `flex-1 w-full min-h-0 overflow-hidden ${mobileKeyboardOpen ? 'h-[calc(var(--silvv-visual-viewport-height,100dvh)-3.5rem-env(safe-area-inset-top))]' : 'h-[calc(100dvh-3.5rem-env(safe-area-inset-top)-3.25rem-env(safe-area-inset-bottom))]'} lg:h-[calc(100dvh-3.5rem)]`
                   : 'flex-1 max-w-6xl w-full mx-auto px-4 sm:px-8 py-6 pb-24 lg:pb-8'
               }
             >
@@ -478,6 +516,7 @@ export default function App() {
                   initialConversationId={selectedConvId}
                   onClearQuickText={() => setQuickChatText(null)}
                   onDataChanged={loadWorkspace}
+                  mobileKeyboardOpen={mobileKeyboardOpen}
                 />
               )}
 
@@ -532,7 +571,7 @@ export default function App() {
           {/* Fixed Bottom Navigation Bar for Mobile / iPhone (5 Main Sections) */}
           <nav
             aria-label="Navegación principal móvil"
-            className="lg:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-zinc-200/70 dark:border-white/10 glass-elevated pb-[env(safe-area-inset-bottom)]"
+            className={`${isFullBleedChat && mobileKeyboardOpen ? 'hidden' : 'lg:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-zinc-200/70 dark:border-white/10 glass-elevated pb-[env(safe-area-inset-bottom)]'}`}
           >
             <div className="grid grid-cols-5">
               {MOBILE_PRIMARY_TABS.map((tabId) => {
@@ -544,7 +583,7 @@ export default function App() {
                     key={tabId}
                     type="button"
                     onClick={() => setActiveTab(tabId)}
-                    className={`min-h-[52px] flex flex-col items-center justify-center gap-0.5 px-1 py-1.5 text-[11px] font-medium cursor-pointer transition-colors ${
+                    className={`min-h-[52px] flex flex-col items-center justify-center gap-0.5 px-1 py-1.5 text-[11px] font-medium cursor-pointer transition-all duration-150 active:scale-95 ${
                       active
                         ? 'text-violet-600 dark:text-violet-400'
                         : 'text-zinc-500 dark:text-zinc-400'
