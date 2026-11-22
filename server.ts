@@ -2,9 +2,9 @@ import 'dotenv/config';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
-import express, { type Response } from 'express';
-import { createServer as createViteServer } from 'vite';
+import express, { type NextFunction, type Request, type Response } from 'express';
 import { requireAuth, type AuthRequest } from './src/middleware/auth.ts';
 import {
   analyzeAgentDocument,
@@ -17,8 +17,10 @@ import {
 } from './src/lib/gemini.ts';
 
 const PORT = Number(process.env.PORT || 3000);
-const UPLOADS_ROOT = path.resolve(process.cwd(), 'uploads');
-const SCHEDULER_STATE_PATH = path.resolve(process.cwd(), '.silvv-scheduler-state.json');
+const IS_VERCEL = Boolean(process.env.VERCEL);
+const WRITABLE_ROOT = IS_VERCEL ? os.tmpdir() : process.cwd();
+const UPLOADS_ROOT = path.resolve(WRITABLE_ROOT, 'uploads');
+const SCHEDULER_STATE_PATH = path.resolve(WRITABLE_ROOT, '.silvv-scheduler-state.json');
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 
 interface ScheduledSourceItem {
@@ -411,9 +413,8 @@ function sendServerError(res: Response, err: unknown, fallback: string) {
   res.status(status).json({ error: message || fallback });
 }
 
-async function startServer() {
-  const app = express();
-  app.use(express.json({ limit: '45mb' }));
+const app = express();
+app.use(express.json({ limit: '45mb' }));
 
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true, service: 'silvv-memory', timestamp: new Date().toISOString() });
@@ -770,6 +771,10 @@ async function startServer() {
       res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(displayName)}"`);
       res.send(data);
     } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code === 'ENOENT') {
+        return res.status(404).json({ error: 'El archivo no está disponible en el almacenamiento temporal del servidor.' });
+      }
       sendServerError(res, err, 'No se pudo descargar el archivo.');
     }
   });
@@ -931,33 +936,41 @@ async function startServer() {
     }
   });
 
-  // =========================================================================
-  // VITE / STATIC SPA SERVING
-  // =========================================================================
+  // Error handler for API routes (prevents uncaught Express errors in serverless runtime)
+  app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    sendServerError(res, err, 'Error interno del servidor.');
+  });
 
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distDir = path.resolve(process.cwd(), 'dist');
-    app.use(express.static(distDir));
-    app.get('*', (_req, res) => {
-      res.sendFile(path.resolve(distDir, 'index.html'));
+  async function startLocalServer() {
+    if (process.env.NODE_ENV !== 'production') {
+      const { createServer: createViteServer } = await import('vite');
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+      });
+      app.use(vite.middlewares);
+    } else {
+      const distDir = path.resolve(process.cwd(), 'dist');
+      app.use(express.static(distDir));
+      app.get('*', (_req, res) => {
+        res.sendFile(path.resolve(distDir, 'index.html'));
+      });
+    }
+
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`SILVV MEMORY server listening on http://0.0.0.0:${PORT}`);
+      setInterval(() => {
+        void runScheduledSummaryCycle();
+      }, 15 * 60 * 1000);
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`SILVV MEMORY server listening on http://0.0.0.0:${PORT}`);
-    setInterval(() => {
-      void runScheduledSummaryCycle();
-    }, 15 * 60 * 1000);
-  });
-}
+  if (!IS_VERCEL) {
+    startLocalServer().catch((err) => {
+      console.error('Failed to start SILVV MEMORY server:', err);
+      process.exit(1);
+    });
+  }
 
-startServer().catch((err) => {
-  console.error('Failed to start SILVV MEMORY server:', err);
-  process.exit(1);
-});
+  export { app };
+  export default app;

@@ -4,7 +4,7 @@ const FAST_MODEL = 'gemini-3.1-flash-lite';
 const FALLBACK_MODEL = 'gemini-4-hydrogen';
 
 function getAiClient(): GoogleGenAI {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY no está configurada en el servidor.');
   }
