@@ -355,6 +355,19 @@ export function InboxView({
       processingStatus: 'processing',
       errorMessage: null,
       metadata: trimmedLink ? { linkUrl: trimmedLink } : {},
+      attachments: currentAtts.map((att, index) => ({
+        id: -(index + 1),
+        fileId: null,
+        attachmentType: att.mimeType.startsWith('image/') ? 'image' : 'other',
+        externalUrl: null,
+        fileName: att.name,
+        mimeType: att.mimeType,
+        aiSummary: null,
+        detectedCategory: null,
+        previewDataUrl: att.mimeType.startsWith('image/')
+          ? `data:${att.mimeType};base64,${att.base64Data}`
+          : undefined,
+      })),
       createdAt: new Date().toISOString(),
     };
 
@@ -828,19 +841,32 @@ export function InboxView({
 
                         {m.attachments && m.attachments.length > 0 && (
                           <div className="mt-2.5 pt-2 border-t border-white/20 dark:border-white/10 space-y-1 text-xs opacity-90">
-                            {m.attachments.some((att) => att.fileId && att.mimeType?.startsWith('image/')) && (
+                            {m.attachments.some(
+                              (att) => att.mimeType?.startsWith('image/') && (att.fileId || att.previewDataUrl),
+                            ) && (
                               <div className="mb-2 flex flex-wrap gap-2">
                                 {m.attachments
-                                  .filter((att) => att.fileId && att.mimeType?.startsWith('image/'))
-                                  .map((att) => (
-                                    <PrivateImagePreview
-                                      key={att.id}
-                                      fileId={att.fileId!}
-                                      alt={att.fileName || 'Imagen adjunta al mensaje'}
-                                      lazy
-                                      className="max-h-64 max-w-full rounded-xl object-contain bg-black/10"
-                                    />
-                                  ))}
+                                  .filter(
+                                    (att) => att.mimeType?.startsWith('image/') && (att.fileId || att.previewDataUrl),
+                                  )
+                                  .map((att) =>
+                                    att.previewDataUrl ? (
+                                      <img
+                                        key={att.id}
+                                        src={att.previewDataUrl}
+                                        alt={att.fileName || 'Imagen adjunta al mensaje'}
+                                        className="max-h-64 max-w-full rounded-xl object-contain bg-black/10"
+                                      />
+                                    ) : (
+                                      <PrivateImagePreview
+                                        key={att.id}
+                                        fileId={att.fileId!}
+                                        alt={att.fileName || 'Imagen adjunta al mensaje'}
+                                        lazy
+                                        className="max-h-64 max-w-full rounded-xl object-contain bg-black/10"
+                                      />
+                                    ),
+                                  )}
                               </div>
                             )}
                             {m.attachments.map((att) => (

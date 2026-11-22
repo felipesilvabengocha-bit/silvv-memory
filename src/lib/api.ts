@@ -312,6 +312,7 @@ export interface MessageAttachment {
   mimeType: string | null;
   aiSummary: string | null;
   detectedCategory: string | null;
+  previewDataUrl?: string;
 }
 
 export interface ProposedActionCard {
