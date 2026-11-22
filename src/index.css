@@ -165,8 +165,29 @@
 
 .silvv-view-transition,
 .animate-silvv-view-in {
-  animation: silvvFadeSlideUp 360ms var(--silvv-motion-spring) both;
+  animation: silvvPageEnter 420ms var(--silvv-motion-spring) both;
   backface-visibility: hidden;
+  transform-origin: top center;
+}
+
+.silvv-view-transition :is(ul, ol, [role="list"], [class*="grid-cols"]) > :nth-child(-n + 6):not(.animate-pulse):not(.animate-spin) {
+  animation: silvvStaggerEnter 380ms var(--silvv-motion-spring) both;
+}
+
+.silvv-view-transition :is(ul, ol, [role="list"], [class*="grid-cols"]) > :nth-child(1):not(.animate-pulse):not(.animate-spin) { animation-delay: 24ms; }
+.silvv-view-transition :is(ul, ol, [role="list"], [class*="grid-cols"]) > :nth-child(2):not(.animate-pulse):not(.animate-spin) { animation-delay: 48ms; }
+.silvv-view-transition :is(ul, ol, [role="list"], [class*="grid-cols"]) > :nth-child(3):not(.animate-pulse):not(.animate-spin) { animation-delay: 72ms; }
+.silvv-view-transition :is(ul, ol, [role="list"], [class*="grid-cols"]) > :nth-child(4):not(.animate-pulse):not(.animate-spin) { animation-delay: 96ms; }
+.silvv-view-transition :is(ul, ol, [role="list"], [class*="grid-cols"]) > :nth-child(5):not(.animate-pulse):not(.animate-spin) { animation-delay: 120ms; }
+.silvv-view-transition :is(ul, ol, [role="list"], [class*="grid-cols"]) > :nth-child(6):not(.animate-pulse):not(.animate-spin) { animation-delay: 144ms; }
+
+div[class~="fixed"][class~="inset-0"][class*="bg-black"] {
+  animation: silvvOverlayIn 240ms var(--silvv-motion-ease) both;
+}
+
+div[class~="fixed"][class~="inset-0"][class*="bg-black"] > div {
+  animation: silvvModalEnter 360ms var(--silvv-motion-spring) both;
+  transform-origin: center;
 }
 
 @keyframes silvvOverlayIn {
@@ -174,8 +195,45 @@
   to { opacity: 1; }
 }
 
+@keyframes silvvPageEnter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0) scale(0.985);
+  }
+  68% {
+    opacity: 1;
+    transform: translate3d(0, -1px, 0) scale(1.002);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes silvvStaggerEnter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 9px, 0) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes silvvModalEnter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(0.975);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
 .animate-silvv-overlay-in {
-  animation: silvvOverlayIn 220ms ease-out both;
+  animation: silvvOverlayIn 240ms var(--silvv-motion-ease) both;
 }
 
 @keyframes silvvEditorOpen {
@@ -219,6 +277,11 @@
     animation: none !important;
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
+  }
+
+  button:not(:disabled):hover,
+  button:not(:disabled):active {
+    transform: none !important;
   }
 }
 
