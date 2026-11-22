@@ -105,8 +105,20 @@ export interface MemoryItem {
 
 export interface MemoryDetailResponse {
   memory: MemoryItem;
-  sourceMessage: { id: number; conversationId: number; content: string; createdAt: string } | null;
-  sourceFile: { id: number; displayName: string; aiSummary: string | null } | null;
+  sourceMessage: {
+    id: number;
+    conversationId: number;
+    content: string;
+    createdAt: string;
+    attachments?: MessageAttachment[];
+  } | null;
+  sourceFile: {
+    id: number;
+    displayName: string;
+    mimeType: string;
+    fileKind: FileItem['fileKind'];
+    aiSummary: string | null;
+  } | null;
   entities: Array<{ relationType: string; entityName: string | null; entityType: string | null }>;
 }
 

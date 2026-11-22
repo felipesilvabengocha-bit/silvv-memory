@@ -18,6 +18,7 @@ import {
   type MemoryItem,
 } from '../lib/api';
 import { FilesView } from './FilesView';
+import { PrivateImagePreview } from './PrivateImagePreview';
 import { ProjectsView } from './ProjectsView';
 
 interface MemoryViewProps {
@@ -408,6 +409,14 @@ export function MemoryView({ onDataChanged, onGoToChat }: MemoryViewProps) {
                     <p className="text-sm text-zinc-600 dark:text-zinc-300 leading-relaxed">
                       {mem.content}
                     </p>
+                    {mem.sourceType === 'image' && mem.sourceFileId && (
+                      <PrivateImagePreview
+                        fileId={mem.sourceFileId}
+                        alt={`Imagen adjunta al recuerdo ${mem.title || mem.category}`}
+                        lazy
+                        className="max-h-36 max-w-full rounded-xl object-contain bg-zinc-100 dark:bg-black/20"
+                      />
+                    )}
                     <p className="text-xs text-zinc-500 dark:text-zinc-400 tabular-nums">
                       {LAYER_LABELS[mem.memoryLayer] || mem.memoryLayer} ·{' '}
                       {ORIGIN_KIND_LABELS[mem.originKind] || mem.originKind} · {mem.category} ·{' '}
@@ -524,6 +533,23 @@ export function MemoryView({ onDataChanged, onGoToChat }: MemoryViewProps) {
                     <p className="text-xs text-zinc-600 dark:text-zinc-300 italic bg-zinc-50 dark:bg-[#09090B] p-3 rounded-lg border border-zinc-200 dark:border-zinc-800">
                       "{detailModal.sourceMessage.content}"
                     </p>
+                    {detailModal.sourceMessage.attachments?.some(
+                      (attachment) => attachment.fileId && attachment.mimeType?.startsWith('image/'),
+                    ) && (
+                      <div className="flex flex-wrap gap-2">
+                        {detailModal.sourceMessage.attachments
+                          .filter((attachment) => attachment.fileId && attachment.mimeType?.startsWith('image/'))
+                          .map((attachment) => (
+                            <PrivateImagePreview
+                              key={attachment.id}
+                              fileId={attachment.fileId!}
+                              alt={attachment.fileName || 'Imagen del mensaje de origen'}
+                              lazy
+                              className="max-h-72 max-w-full rounded-xl object-contain bg-zinc-100 dark:bg-black/20"
+                            />
+                          ))}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -535,6 +561,17 @@ export function MemoryView({ onDataChanged, onGoToChat }: MemoryViewProps) {
                     <p className="text-xs font-medium text-zinc-800 dark:text-zinc-200">
                       {detailModal.sourceFile.displayName}
                     </p>
+                    {detailModal.sourceFile.fileKind === 'image' &&
+                      !detailModal.sourceMessage?.attachments?.some(
+                        (attachment) => attachment.fileId === detailModal.sourceFile?.id,
+                      ) && (
+                        <PrivateImagePreview
+                          fileId={detailModal.sourceFile.id}
+                          alt={detailModal.sourceFile.displayName}
+                          lazy
+                          className="max-h-72 max-w-full rounded-xl object-contain bg-zinc-100 dark:bg-black/20"
+                        />
+                      )}
                     {detailModal.sourceFile.aiSummary && (
                       <p className="text-xs text-zinc-500 dark:text-zinc-400">
                         {detailModal.sourceFile.aiSummary}
