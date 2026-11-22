@@ -166,10 +166,12 @@ async function ensureSmartFolderPath(
 function AttachmentThumb({
   attachment,
   onDownload,
+  onPreview,
   onRemove,
 }: {
   attachment: NoteAttachment;
   onDownload: (att: NoteAttachment) => void;
+  onPreview: (att: NoteAttachment) => void;
   onRemove: (attId: number) => void;
 }) {
   const [imgUrl, setImgUrl] = useState<string | null>(null);
@@ -204,17 +206,27 @@ function AttachmentThumb({
   return (
     <div className="glass-subtle rounded-xl p-2.5 flex items-center justify-between gap-3">
       <div className="flex items-center gap-2.5 min-w-0">
-        {attachment.fileKind === 'image' && imgUrl ? (
-          <img
-            src={imgUrl}
-            alt={attachment.fileName}
-            referrerPolicy="no-referrer"
-            className="w-10 h-10 rounded-lg object-cover border border-zinc-200 dark:border-zinc-800 shrink-0"
-          />
-        ) : attachment.fileKind === 'image' ? (
-          <div className="w-10 h-10 rounded-lg bg-zinc-200/70 dark:bg-zinc-800 flex items-center justify-center shrink-0">
-            <ImageIcon className="w-4 h-4 text-zinc-500" />
-          </div>
+        {attachment.fileKind === 'image' ? (
+          <button
+            type="button"
+            onClick={() => onPreview(attachment)}
+            aria-label={`Ver foto: ${attachment.fileName}`}
+            title="Abrir vista previa"
+            className="w-10 h-10 rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-800 shrink-0 cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+          >
+            {imgUrl ? (
+              <img
+                src={imgUrl}
+                alt=""
+                referrerPolicy="no-referrer"
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <span className="w-full h-full bg-zinc-200/70 dark:bg-zinc-800 flex items-center justify-center">
+                <ImageIcon className="w-4 h-4 text-zinc-500" />
+              </span>
+            )}
+          </button>
         ) : (
           <div className="w-10 h-10 rounded-lg bg-zinc-200/70 dark:bg-zinc-800 flex items-center justify-center shrink-0">
             <FileText className="w-4 h-4 text-zinc-500" />
@@ -231,6 +243,17 @@ function AttachmentThumb({
       </div>
 
       <div className="flex items-center gap-1 shrink-0">
+        {attachment.fileKind === 'image' && (
+          <button
+            type="button"
+            onClick={() => onPreview(attachment)}
+            aria-label={`Ver foto: ${attachment.fileName}`}
+            title="Abrir vista previa"
+            className="p-1.5 rounded-lg text-zinc-500 hover:text-violet-600 dark:hover:text-violet-300 cursor-pointer"
+          >
+            <Eye className="w-3.5 h-3.5" />
+          </button>
+        )}
         <button
           type="button"
           onClick={() => onDownload(attachment)}
@@ -274,6 +297,10 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
   const [previewMode, setPreviewMode] = useState(false);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [uploadingAtt, setUploadingAtt] = useState(false);
+  const [previewAttachment, setPreviewAttachment] = useState<NoteAttachment | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   const [quickOpen, setQuickOpen] = useState(false);
   const [quickText, setQuickText] = useState('');
@@ -286,12 +313,62 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
   const [renameFolderVal, setRenameFolderVal] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const previewDialogRef = useRef<HTMLDivElement>(null);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hydratingRef = useRef(false);
   const foldersRef = useRef<NoteFolderItem[]>([]);
   const foldersLoadedRef = useRef(false);
   const loadRequestIdRef = useRef(0);
   const smartRootFoldersPromiseRef = useRef<Promise<NoteFolderItem[]> | null>(null);
+
+  useEffect(() => {
+    if (!previewAttachment) {
+      setPreviewUrl(null);
+      setPreviewLoading(false);
+      setPreviewError(null);
+      return;
+    }
+
+    let mounted = true;
+    let objectUrl: string | null = null;
+    setPreviewUrl(null);
+    setPreviewError(null);
+    setPreviewLoading(true);
+
+    fetchPrivateStorageBlobUrl({
+      storagePath: previewAttachment.storagePath,
+      mimeType: previewAttachment.mimeType,
+      displayName: previewAttachment.fileName,
+    })
+      .then((url) => {
+        if (mounted) {
+          objectUrl = url;
+          setPreviewUrl(url);
+        } else {
+          URL.revokeObjectURL(url);
+        }
+      })
+      .catch(() => {
+        if (mounted) setPreviewError('No se pudo cargar la vista previa. Intenta descargar la imagen.');
+      })
+      .finally(() => {
+        if (mounted) setPreviewLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [previewAttachment]);
+
+  useEffect(() => {
+    if (!previewAttachment) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPreviewAttachment(null);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [previewAttachment]);
 
   const loadAll = async (q = searchQuery) => {
     const requestId = ++loadRequestIdRef.current;
@@ -1442,6 +1519,7 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
                           key={att.id}
                           attachment={att}
                           onDownload={handleDownloadAttachment}
+                          onPreview={setPreviewAttachment}
                           onRemove={handleRemoveAttachment}
                         />
                       ))}
@@ -1453,6 +1531,74 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
           </div>
         </div>
       </div>
+
+      {previewAttachment && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm"
+          onClick={() => setPreviewAttachment(null)}
+        >
+          <div
+            ref={previewDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="attachment-preview-title"
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              if (event.key !== 'Tab') return;
+              const focusable = previewDialogRef.current?.querySelectorAll<HTMLElement>(
+                'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+              );
+              if (!focusable?.length) return;
+              const first = focusable[0];
+              const last = focusable[focusable.length - 1];
+              if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+              } else if (
+                !event.shiftKey &&
+                (document.activeElement === last || !previewDialogRef.current?.contains(document.activeElement))
+              ) {
+                event.preventDefault();
+                first.focus();
+              }
+            }}
+            className="flex max-h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-zinc-950 shadow-2xl"
+          >
+            <div className="flex items-center justify-between gap-4 border-b border-white/10 px-4 py-3">
+              <p id="attachment-preview-title" className="truncate text-sm font-medium text-white">
+                {previewAttachment.fileName}
+              </p>
+              <button
+                type="button"
+                autoFocus
+                onClick={() => setPreviewAttachment(null)}
+                aria-label="Cerrar vista previa"
+                title="Cerrar"
+                className="shrink-0 rounded-lg p-2 text-zinc-300 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="flex min-h-48 flex-1 items-center justify-center overflow-auto p-3 sm:p-6">
+              {previewLoading ? (
+                <div role="status" className="flex items-center gap-3 text-sm text-zinc-300">
+                  <span className="h-5 w-5 animate-spin rounded-full border-2 border-violet-400 border-t-transparent" />
+                  Cargando foto…
+                </div>
+              ) : previewError ? (
+                <p role="alert" className="text-sm text-zinc-300">{previewError}</p>
+              ) : previewUrl ? (
+                <img
+                  src={previewUrl}
+                  alt={previewAttachment.fileName}
+                  referrerPolicy="no-referrer"
+                  className="max-h-[calc(100vh-8rem)] max-w-full object-contain"
+                />
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
