@@ -1,0 +1,704 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Private user account profile and regional preferences",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 254 },
+        "fullName": { "type": "string", "maxLength": 120 },
+        "avatarUrl": { "type": "string", "maxLength": 1000 },
+        "language": { "type": "string", "maxLength": 20 },
+        "timezone": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "language", "timezone", "createdAt", "updatedAt"]
+    },
+    "UserPreferences": {
+      "title": "UserPreferences",
+      "description": "User autonomy, theme, and classification threshold settings",
+      "type": "object",
+      "properties": {
+        "userUid": { "type": "string", "maxLength": 128 },
+        "theme": { "type": "string", "enum": ["dark", "light", "system"] },
+        "accentColor": { "type": "string", "maxLength": 24 },
+        "uiDensity": { "type": "string", "enum": ["comfortable", "compact"] },
+        "autonomyLevel": { "type": "string", "enum": ["manual", "balanced", "proactive"] },
+        "autoCreateCalendarEvents": { "type": "boolean" },
+        "autoClassifyThreshold": { "type": "number" },
+        "proactiveNotificationsEnabled": { "type": "boolean" },
+        "quietHoursStart": { "type": "string", "maxLength": 16 },
+        "quietHoursEnd": { "type": "string", "maxLength": 16 },
+        "disabledMemoryCategories": { "type": "array" },
+        "customEventCategories": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userUid",
+        "theme",
+        "accentColor",
+        "uiDensity",
+        "autonomyLevel",
+        "autoCreateCalendarEvents",
+        "autoClassifyThreshold",
+        "proactiveNotificationsEnabled",
+        "disabledMemoryCategories",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Integration": {
+      "title": "Integration",
+      "description": "External service integration metadata (e.g. Google Calendar)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "userUid": { "type": "string", "maxLength": 128 },
+        "provider": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "enum": ["connected", "disconnected", "error"] },
+        "accountEmail": { "type": "string", "maxLength": 254 },
+        "lastSyncedAt": { "type": "string", "maxLength": 64 },
+        "lastError": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userUid", "provider", "status", "createdAt", "updatedAt"]
+    },
+    "Folder": {
+      "title": "Folder",
+      "description": "Hierarchical folder node for organizing files and memories",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "userUid": { "type": "string", "maxLength": 128 },
+        "parentId": { "type": "number" },
+        "name": { "type": "string", "maxLength": 80 },
+        "slug": { "type": "string", "maxLength": 100 },
+        "category": { "type": "string", "maxLength": 64 },
+        "description": { "type": "string", "maxLength": 500 },
+        "isSystem": { "type": "boolean" },
+        "autoCreated": { "type": "boolean" },
+        "deletedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userUid", "name", "slug", "isSystem", "autoCreated", "createdAt", "updatedAt"]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "Active personal or professional project with objectives",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "userUid": { "type": "string", "maxLength": 128 },
+        "folderId": { "type": "number" },
+        "name": { "type": "string", "maxLength": 120 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "category": { "type": "string", "maxLength": 64 },
+        "objectives": { "type": "array" },
+        "status": { "type": "string", "enum": ["idea", "active", "paused", "completed", "archived"] },
+        "progressPercent": { "type": "number" },
+        "targetDate": { "type": "string", "maxLength": 64 },
+        "isPriority": { "type": "boolean" },
+        "autoCreated": { "type": "boolean" },
+        "lastActivityAt": { "type": "string", "maxLength": 64 },
+        "deletedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "userUid",
+        "name",
+        "objectives",
+        "status",
+        "progressPercent",
+        "isPriority",
+        "autoCreated",
+        "lastActivityAt",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "General chat conversation thread",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "userUid": { "type": "string", "maxLength": 128 },
+        "projectId": { "type": "number" },
+        "title": { "type": "string", "maxLength": 120 },
+        "contextSummary": { "type": "string", "maxLength": 2000 },
+        "isArchived": { "type": "boolean" },
+        "lastMessageAt": { "type": "string", "maxLength": 64 },
+        "deletedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userUid", "title", "isArchived", "lastMessageAt", "createdAt", "updatedAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "General chat message turn with attachment references and metadata",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "userUid": { "type": "string", "maxLength": 128 },
+        "conversationId": { "type": "number" },
+        "role": { "type": "string", "enum": ["user", "assistant", "system"] },
+        "content": { "type": "string", "maxLength": 65000 },
+        "processingStatus": {
+          "type": "string",
+          "enum": ["received", "processing", "analyzed", "organized", "pending_confirmation", "error"]
+        },
+        "errorMessage": { "type": "string", "maxLength": 1000 },
+        "editedAt": { "type": "string", "maxLength": 64 },
+        "metadata": { "type": "object" },
+        "attachments": { "type": "array" },
+        "deletedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userUid", "conversationId", "role", "content", "processingStatus", "metadata", "attachments", "createdAt", "updatedAt"]
+    },
+    "FileRecord": {
+      "title": "FileRecord",
+      "description": "Uploaded file metadata, extracted text, AI summary, and embedding",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "userUid": { "type": "string", "maxLength": 128 },
+        "folderId": { "type": "number" },
+        "projectId": { "type": "number" },
+        "storagePath": { "type": "string", "maxLength": 512 },
+        "originalName": { "type": "string", "maxLength": 200 },
+        "displayName": { "type": "string", "maxLength": 200 },
+        "mimeType": { "type": "string", "maxLength": 120 },
+        "sizeBytes": { "type": "number" },
+        "fileKind": { "type": "string", "enum": ["image", "pdf", "document", "audio", "link", "other"] },
+        "extractedText": { "type": "string", "maxLength": 65000 },
+        "aiSummary": { "type": "string", "maxLength": 16000 },
+        "detectedCategory": { "type": "string", "maxLength": 64 },
+        "classificationConfidence": { "type": "number" },
+        "processingStatus": { "type": "string", "maxLength": 40 },
+        "errorMessage": { "type": "string", "maxLength": 1000 },
+        "embedding": { "type": "array" },
+        "deletedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userUid", "storagePath", "originalName", "displayName", "mimeType", "sizeBytes", "fileKind", "processingStatus", "createdAt", "updatedAt"]
+    },
+    "Memory": {
+      "title": "Memory",
+      "description": "Structured permanent memory across 4 cognitive layers",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "userUid": { "type": "string", "maxLength": 128 },
+        "memoryLayer": { "type": "string", "enum": ["episodic", "semantic", "project", "temporal"] },
+        "originKind": { "type": "string", "maxLength": 32 },
+        "category": { "type": "string", "maxLength": 64 },
+        "title": { "type": "string", "maxLength": 200 },
+        "content": { "type": "string", "maxLength": 16000 },
+        "tags": { "type": "array" },
+        "entities": { "type": "array" },
+        "importance": { "type": "number" },
+        "confidence": { "type": "number" },
+        "isActive": { "type": "boolean" },
+        "projectId": { "type": "number" },
+        "folderId": { "type": "number" },
+        "sourceType": { "type": "string", "maxLength": 32 },
+        "sourceConversationId": { "type": "number" },
+        "sourceMessageId": { "type": "number" },
+        "sourceFileId": { "type": "number" },
+        "expiresAt": { "type": "string", "maxLength": 64 },
+        "embedding": { "type": "array" },
+        "deletedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userUid", "memoryLayer", "originKind", "category", "content", "tags", "entities", "importance", "confidence", "isActive", "sourceType", "createdAt", "updatedAt"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "Actionable task, reminder, or deadline",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "userUid": { "type": "string", "maxLength": 128 },
+        "projectId": { "type": "number" },
+        "title": { "type": "string", "maxLength": 180 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "kind": { "type": "string", "enum": ["task", "deadline", "reminder"] },
+        "status": { "type": "string", "enum": ["pending", "in_progress", "done", "cancelled"] },
+        "priority": { "type": "string", "enum": ["low", "medium", "high", "urgent"] },
+        "dueAt": { "type": "string", "maxLength": 64 },
+        "completedAt": { "type": "string", "maxLength": 64 },
+        "sourceMessageId": { "type": "number" },
+        "sourceFileId": { "type": "number" },
+        "deletedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userUid", "title", "kind", "status", "priority", "createdAt", "updatedAt"]
+    },
+    "CalendarEvent": {
+      "title": "CalendarEvent",
+      "description": "Real Agenda event synced with Google Calendar or local SILVV MEMORY schedule",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "userUid": { "type": "string", "maxLength": 128 },
+        "projectId": { "type": "number" },
+        "externalProvider": { "type": "string", "maxLength": 32 },
+        "externalEventId": { "type": "string", "maxLength": 256 },
+        "syncStatus": { "type": "string", "maxLength": 32 },
+        "title": { "type": "string", "maxLength": 180 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "category": { "type": "string", "maxLength": 64 },
+        "location": { "type": "string", "maxLength": 240 },
+        "startAt": { "type": "string", "maxLength": 64 },
+        "endAt": { "type": "string", "maxLength": 64 },
+        "allDay": { "type": "boolean" },
+        "timezone": { "type": "string", "maxLength": 64 },
+        "sourceMessageId": { "type": "number" },
+        "sourceFileId": { "type": "number" },
+        "linkedMemoryEventId": { "type": "number" },
+        "deletedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userUid", "externalProvider", "syncStatus", "title", "startAt", "endAt", "allDay", "timezone", "createdAt", "updatedAt"]
+    },
+    "NoteFolder": {
+      "title": "NoteFolder",
+      "description": "Folder for organizing personal notes in SILVV MEMORY",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "userUid": { "type": "string", "maxLength": 128 },
+        "parentId": { "type": "number" },
+        "name": { "type": "string", "maxLength": 80 },
+        "color": { "type": "string", "maxLength": 24 },
+        "deletedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userUid", "name", "createdAt", "updatedAt"]
+    },
+    "Note": {
+      "title": "Note",
+      "description": "Personal rich note connected to chatbots, folders, tags, and attachments",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "userUid": { "type": "string", "maxLength": 128 },
+        "folderId": { "type": "number" },
+        "projectId": { "type": "number" },
+        "title": { "type": "string", "maxLength": 200 },
+        "content": { "type": "string", "maxLength": 65000 },
+        "tags": { "type": "array" },
+        "isQuick": { "type": "boolean" },
+        "isPinned": { "type": "boolean" },
+        "isArchived": { "type": "boolean" },
+        "attachments": { "type": "array" },
+        "sourceConversationId": { "type": "number" },
+        "sourceMessageId": { "type": "number" },
+        "embedding": { "type": "array" },
+        "deletedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userUid", "title", "content", "tags", "isQuick", "isPinned", "isArchived", "attachments", "createdAt", "updatedAt"]
+    },
+    "MemoryEvent": {
+      "title": "MemoryEvent",
+      "description": "Agenda Memoria personal life event with temporal precision and relations",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "userUid": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 16000 },
+        "eventDate": { "type": "string", "maxLength": 64 },
+        "datePrecision": { "type": "string", "enum": ["exact", "day", "approximate", "unknown"] },
+        "dateLabel": { "type": "string", "maxLength": 120 },
+        "category": { "type": "string", "maxLength": 64 },
+        "people": { "type": "array" },
+        "projectId": { "type": "number" },
+        "sourceConversationId": { "type": "number" },
+        "sourceMessageId": { "type": "number" },
+        "sourceMessageText": { "type": "string", "maxLength": 4000 },
+        "relatedFileIds": { "type": "array" },
+        "relatedNoteIds": { "type": "array" },
+        "tags": { "type": "array" },
+        "importance": { "type": "number" },
+        "embedding": { "type": "array" },
+        "deletedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userUid", "title", "description", "datePrecision", "category", "people", "relatedFileIds", "relatedNoteIds", "tags", "importance", "createdAt", "updatedAt"]
+    },
+    "PersonEntity": {
+      "title": "PersonEntity",
+      "description": "Tracked person entity linked to memory events and conversations",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "userUid": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 120 },
+        "normalizedName": { "type": "string", "maxLength": 120 },
+        "relationship": { "type": "string", "maxLength": 120 },
+        "notes": { "type": "string", "maxLength": 2000 },
+        "mentionCount": { "type": "number" },
+        "lastMentionedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userUid", "name", "normalizedName", "mentionCount", "createdAt", "updatedAt"]
+    },
+    "EventRelation": {
+      "title": "EventRelation",
+      "description": "Directional relation connecting memory events to people, projects, notes, files, or other events",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "userUid": { "type": "string", "maxLength": 128 },
+        "sourceEventId": { "type": "number" },
+        "targetType": { "type": "string", "enum": ["memory_event", "person", "project", "note", "file", "calendar_event"] },
+        "targetId": { "type": "number" },
+        "targetLabel": { "type": "string", "maxLength": 200 },
+        "relationKind": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userUid", "sourceEventId", "targetType", "targetId", "targetLabel", "relationKind", "createdAt", "updatedAt"]
+    },
+    "SummaryRecord": {
+      "title": "SummaryRecord",
+      "description": "Automated or manual daily, weekly, or monthly personal intelligence summary",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "userUid": { "type": "string", "maxLength": 128 },
+        "periodKind": { "type": "string", "enum": ["daily", "weekly", "monthly"] },
+        "periodKey": { "type": "string", "maxLength": 32 },
+        "periodStart": { "type": "string", "maxLength": 64 },
+        "periodEnd": { "type": "string", "maxLength": 64 },
+        "title": { "type": "string", "maxLength": 200 },
+        "narrative": { "type": "string", "maxLength": 65000 },
+        "sections": { "type": "object" },
+        "generatedMode": { "type": "string", "enum": ["auto", "manual"] },
+        "savedNoteId": { "type": "number" },
+        "deletedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userUid", "periodKind", "periodKey", "periodStart", "periodEnd", "title", "narrative", "sections", "generatedMode", "createdAt", "updatedAt"]
+    },
+    "SummarySource": {
+      "title": "SummarySource",
+      "description": "Traceable source reference used inside a generated summary",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "userUid": { "type": "string", "maxLength": 128 },
+        "summaryKind": { "type": "string", "enum": ["daily", "weekly", "monthly"] },
+        "summaryId": { "type": "number" },
+        "sourceType": { "type": "string", "maxLength": 32 },
+        "sourceId": { "type": "number" },
+        "title": { "type": "string", "maxLength": 200 },
+        "excerpt": { "type": "string", "maxLength": 1000 },
+        "sourceDate": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userUid", "summaryKind", "summaryId", "sourceType", "sourceId", "title", "excerpt", "createdAt", "updatedAt"]
+    },
+    "ActionLog": {
+      "title": "ActionLog",
+      "description": "Audit log for AI-proposed and user-confirmed actions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "userUid": { "type": "string", "maxLength": 128 },
+        "toolName": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "enum": ["requested", "confirmed", "executed", "failed", "rejected"] },
+        "inputPayload": { "type": "object" },
+        "outputPayload": { "type": "object" },
+        "errorMessage": { "type": "string", "maxLength": 1000 },
+        "requiresConfirmation": { "type": "boolean" },
+        "confirmedByUser": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userUid", "toolName", "status", "inputPayload", "outputPayload", "requiresConfirmation", "confirmedByUser", "createdAt", "updatedAt"]
+    },
+    "KnowledgeConversation": {
+      "title": "KnowledgeConversation",
+      "description": "Personal knowledge research conversation session",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "userUid": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 160 },
+        "deepMode": { "type": "boolean" },
+        "deletedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userUid", "title", "deepMode", "createdAt", "updatedAt"]
+    },
+    "KnowledgeMessage": {
+      "title": "KnowledgeMessage",
+      "description": "Grounded message with verified citations inside Knowledge Chat",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "userUid": { "type": "string", "maxLength": 128 },
+        "conversationId": { "type": "number" },
+        "role": { "type": "string", "enum": ["user", "assistant"] },
+        "content": { "type": "string", "maxLength": 65000 },
+        "deepMode": { "type": "boolean" },
+        "citations": { "type": "array" },
+        "metadata": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userUid", "conversationId", "role", "content", "deepMode", "citations", "metadata", "createdAt", "updatedAt"]
+    },
+    "Agent": {
+      "title": "Agent",
+      "description": "Custom AI agent configuration with strict data isolation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "userUid": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "icon": { "type": "string", "maxLength": 32 },
+        "instructions": { "type": "string", "maxLength": 16000 },
+        "personality": { "type": "string", "maxLength": 300 },
+        "objective": { "type": "string", "maxLength": 500 },
+        "responseStyle": { "type": "string", "maxLength": 300 },
+        "depthLevel": { "type": "string", "enum": ["concise", "balanced", "deep"] },
+        "toolsEnabled": { "type": "array" },
+        "memoryEnabled": { "type": "boolean" },
+        "permissionMode": {
+          "type": "string",
+          "enum": ["docs_only", "docs_and_agent_memory", "docs_and_selected_folders", "full_personal_memory"]
+        },
+        "allowedFolderIds": { "type": "array" },
+        "isArchived": { "type": "boolean" },
+        "deletedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "userUid",
+        "name",
+        "icon",
+        "instructions",
+        "personality",
+        "responseStyle",
+        "depthLevel",
+        "toolsEnabled",
+        "memoryEnabled",
+        "permissionMode",
+        "allowedFolderIds",
+        "isArchived",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AgentSource": {
+      "title": "AgentSource",
+      "description": "Document uploaded exclusively to a custom agent",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "userUid": { "type": "string", "maxLength": 128 },
+        "agentId": { "type": "number" },
+        "fileName": { "type": "string", "maxLength": 200 },
+        "mimeType": { "type": "string", "maxLength": 120 },
+        "sizeBytes": { "type": "number" },
+        "storagePath": { "type": "string", "maxLength": 512 },
+        "aiSummary": { "type": "string", "maxLength": 16000 },
+        "extractedText": { "type": "string", "maxLength": 65000 },
+        "embedding": { "type": "array" },
+        "deletedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userUid", "agentId", "fileName", "mimeType", "sizeBytes", "createdAt", "updatedAt"]
+    },
+    "AgentMemory": {
+      "title": "AgentMemory",
+      "description": "Memory learned inside a specific custom agent",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "userUid": { "type": "string", "maxLength": 128 },
+        "agentId": { "type": "number" },
+        "content": { "type": "string", "maxLength": 8000 },
+        "category": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userUid", "agentId", "content", "category", "createdAt", "updatedAt"]
+    },
+    "AgentConversation": {
+      "title": "AgentConversation",
+      "description": "Isolated conversation thread with a custom agent",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "userUid": { "type": "string", "maxLength": 128 },
+        "agentId": { "type": "number" },
+        "title": { "type": "string", "maxLength": 160 },
+        "deletedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userUid", "agentId", "title", "createdAt", "updatedAt"]
+    },
+    "AgentMessage": {
+      "title": "AgentMessage",
+      "description": "Message inside a custom agent conversation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "userUid": { "type": "string", "maxLength": 128 },
+        "conversationId": { "type": "number" },
+        "agentId": { "type": "number" },
+        "role": { "type": "string", "enum": ["user", "assistant"] },
+        "content": { "type": "string", "maxLength": 65000 },
+        "citations": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userUid", "conversationId", "agentId", "role", "content", "citations", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private user profile document keyed by Firebase Auth UID"
+    },
+    "/users/{userId}/preferences/{prefId}": {
+      "schema": { "$ref": "#/entities/UserPreferences" },
+      "description": "User preferences document"
+    },
+    "/users/{userId}/integrations/{intId}": {
+      "schema": { "$ref": "#/entities/Integration" },
+      "description": "User integration states (Google Calendar)"
+    },
+    "/users/{userId}/folders/{folderId}": {
+      "schema": { "$ref": "#/entities/Folder" },
+      "description": "User folder hierarchy"
+    },
+    "/users/{userId}/projects/{projectId}": {
+      "schema": { "$ref": "#/entities/Project" },
+      "description": "User projects"
+    },
+    "/users/{userId}/conversations/{convId}": {
+      "schema": { "$ref": "#/entities/Conversation" },
+      "description": "User general chat conversations"
+    },
+    "/users/{userId}/messages/{msgId}": {
+      "schema": { "$ref": "#/entities/Message" },
+      "description": "User general chat messages"
+    },
+    "/users/{userId}/files/{fileId}": {
+      "schema": { "$ref": "#/entities/FileRecord" },
+      "description": "User uploaded files metadata and summaries"
+    },
+    "/users/{userId}/memories/{memId}": {
+      "schema": { "$ref": "#/entities/Memory" },
+      "description": "User 4-layer structured memories"
+    },
+    "/users/{userId}/tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/Task" },
+      "description": "User tasks and reminders"
+    },
+    "/users/{userId}/calendarEvents/{eventId}": {
+      "schema": { "$ref": "#/entities/CalendarEvent" },
+      "description": "User real agenda events"
+    },
+    "/users/{userId}/noteFolders/{folderId}": {
+      "schema": { "$ref": "#/entities/NoteFolder" },
+      "description": "Folders for user notes"
+    },
+    "/users/{userId}/notes/{noteId}": {
+      "schema": { "$ref": "#/entities/Note" },
+      "description": "User rich notes connected to chatbots"
+    },
+    "/users/{userId}/memoryEvents/{mevId}": {
+      "schema": { "$ref": "#/entities/MemoryEvent" },
+      "description": "Agenda Memoria chronological life events"
+    },
+    "/users/{userId}/peopleEntities/{personId}": {
+      "schema": { "$ref": "#/entities/PersonEntity" },
+      "description": "People mentioned across events and conversations"
+    },
+    "/users/{userId}/eventRelations/{relId}": {
+      "schema": { "$ref": "#/entities/EventRelation" },
+      "description": "Relations between memory events, people, projects, notes, and files"
+    },
+    "/users/{userId}/dailySummaries/{sumId}": {
+      "schema": { "$ref": "#/entities/SummaryRecord" },
+      "description": "Automated and manual daily summaries"
+    },
+    "/users/{userId}/weeklySummaries/{sumId}": {
+      "schema": { "$ref": "#/entities/SummaryRecord" },
+      "description": "Automated and manual weekly summaries"
+    },
+    "/users/{userId}/monthlySummaries/{sumId}": {
+      "schema": { "$ref": "#/entities/SummaryRecord" },
+      "description": "Automated and manual monthly summaries"
+    },
+    "/users/{userId}/summarySources/{srcId}": {
+      "schema": { "$ref": "#/entities/SummarySource" },
+      "description": "Traceable source references for summaries"
+    },
+    "/users/{userId}/actionsLog/{actionId}": {
+      "schema": { "$ref": "#/entities/ActionLog" },
+      "description": "Audit log of AI actions"
+    },
+    "/users/{userId}/knowledgeConversations/{kcId}": {
+      "schema": { "$ref": "#/entities/KnowledgeConversation" },
+      "description": "Knowledge RAG research threads"
+    },
+    "/users/{userId}/knowledgeMessages/{kmId}": {
+      "schema": { "$ref": "#/entities/KnowledgeMessage" },
+      "description": "Knowledge RAG messages with verified citations"
+    },
+    "/users/{userId}/agents/{agentId}": {
+      "schema": { "$ref": "#/entities/Agent" },
+      "description": "User custom AI agents"
+    },
+    "/users/{userId}/agentSources/{srcId}": {
+      "schema": { "$ref": "#/entities/AgentSource" },
+      "description": "Custom agent document sources"
+    },
+    "/users/{userId}/agentMemories/{amId}": {
+      "schema": { "$ref": "#/entities/AgentMemory" },
+      "description": "Isolated custom agent memories"
+    },
+    "/users/{userId}/agentConversations/{acId}": {
+      "schema": { "$ref": "#/entities/AgentConversation" },
+      "description": "Custom agent conversations"
+    },
+    "/users/{userId}/agentMessages/{amsgId}": {
+      "schema": { "$ref": "#/entities/AgentMessage" },
+      "description": "Custom agent messages"
+    }
+  }
+}

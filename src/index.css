@@ -1,0 +1,130 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    --font-display: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    --font-sans: 'DM Sans', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  h1, h2, h3, .font-display {
+    font-family: var(--font-display);
+    text-wrap: balance;
+  }
+
+  code, pre, .font-mono {
+    font-family: var(--font-mono);
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* iOS 18 translucent glassmorphism surfaces with safe fallbacks */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(228, 228, 231, 0.85);
+}
+.dark .glass-panel {
+  background: rgba(20, 20, 25, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-elevated {
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(228, 228, 231, 0.9);
+  box-shadow: 0 20px 50px -20px rgba(0, 0, 0, 0.16);
+}
+.dark .glass-elevated {
+  background: rgba(24, 24, 31, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  box-shadow: 0 24px 60px -18px rgba(0, 0, 0, 0.65);
+}
+
+.glass-subtle {
+  background: rgba(244, 244, 245, 0.68);
+  border: 1px solid rgba(228, 228, 231, 0.7);
+}
+.dark .glass-subtle {
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+@supports (backdrop-filter: blur(18px)) {
+  .glass-panel {
+    backdrop-filter: blur(20px) saturate(145%);
+    -webkit-backdrop-filter: blur(20px) saturate(145%);
+  }
+  .glass-elevated {
+    backdrop-filter: blur(28px) saturate(160%);
+    -webkit-backdrop-filter: blur(28px) saturate(160%);
+  }
+  .glass-subtle {
+    backdrop-filter: blur(12px) saturate(130%);
+    -webkit-backdrop-filter: blur(12px) saturate(130%);
+  }
+}
+
+.silvv-ambient-bg {
+  background-image:
+    radial-gradient(60% 45% at 15% 0%, rgba(139, 92, 246, 0.09), transparent 70%),
+    radial-gradient(50% 40% at 88% 12%, rgba(59, 130, 246, 0.07), transparent 70%);
+}
+.dark .silvv-ambient-bg {
+  background-image:
+    radial-gradient(55% 42% at 12% 0%, rgba(139, 92, 246, 0.14), transparent 70%),
+    radial-gradient(48% 38% at 88% 8%, rgba(37, 99, 235, 0.11), transparent 70%),
+    radial-gradient(45% 35% at 50% 100%, rgba(109, 40, 217, 0.06), transparent 72%);
+}
+
+/* Smooth compositor-only entrance transitions */
+@keyframes silvvFadeSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-silvv-in {
+  animation: silvvFadeSlideUp 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-silvv-in {
+    animation: none;
+  }
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* Subtle custom scrollbars for dark/light workspace */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(113, 113, 122, 0.35);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(113, 113, 122, 0.55);
+}

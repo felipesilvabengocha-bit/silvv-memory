@@ -1,0 +1,808 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global safety net: deny all reads and writes by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isReqStr(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    function isOptStr(val, maxLen) {
+      return val == null || (val is string && val.size() <= maxLen);
+    }
+
+    function isOptNum(val) {
+      return val == null || val is int || val is float;
+    }
+
+    function isNum(val) {
+      return val is int || val is float;
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'email', 'language', 'timezone', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'fullName', 'avatarUrl', 'language', 'timezone', 'createdAt', 'updatedAt'])
+        && data.uid == request.auth.uid
+        && isReqStr(data.uid, 1, 128)
+        && isReqStr(data.email, 3, 254)
+        && isOptStr(data.get('fullName', null), 120)
+        && isOptStr(data.get('avatarUrl', null), 1000)
+        && isReqStr(data.language, 1, 20)
+        && isReqStr(data.timezone, 1, 64);
+    }
+
+    function isValidPreferences(data) {
+      return data.keys().hasAll([
+          'userUid', 'theme', 'accentColor', 'uiDensity', 'autonomyLevel',
+          'autoCreateCalendarEvents', 'autoClassifyThreshold', 'proactiveNotificationsEnabled',
+          'disabledMemoryCategories', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userUid', 'theme', 'accentColor', 'uiDensity', 'autonomyLevel',
+          'autoCreateCalendarEvents', 'autoClassifyThreshold', 'proactiveNotificationsEnabled',
+          'quietHoursStart', 'quietHoursEnd', 'disabledMemoryCategories', 'customEventCategories',
+          'createdAt', 'updatedAt'
+        ])
+        && data.userUid == request.auth.uid
+        && isReqStr(data.userUid, 1, 128)
+        && data.theme in ['dark', 'light', 'system']
+        && isReqStr(data.accentColor, 1, 24)
+        && data.uiDensity in ['comfortable', 'compact']
+        && data.autonomyLevel in ['manual', 'balanced', 'proactive']
+        && data.autoCreateCalendarEvents is bool
+        && isNum(data.autoClassifyThreshold)
+        && data.autoClassifyThreshold >= 0.3 && data.autoClassifyThreshold <= 1.0
+        && data.proactiveNotificationsEnabled is bool
+        && isOptStr(data.get('quietHoursStart', null), 16)
+        && isOptStr(data.get('quietHoursEnd', null), 16)
+        && data.disabledMemoryCategories is list
+        && data.disabledMemoryCategories.size() <= 30
+        && (data.disabledMemoryCategories.size() == 0 || data.disabledMemoryCategories[0] is string)
+        && (data.get('customEventCategories', null) == null || (data.customEventCategories is list && data.customEventCategories.size() <= 40));
+    }
+
+    function isValidIntegration(data) {
+      return data.keys().hasAll(['id', 'userUid', 'provider', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'provider', 'status', 'accountEmail', 'lastSyncedAt', 'lastError', 'createdAt', 'updatedAt'])
+        && isNum(data.id)
+        && data.userUid == request.auth.uid
+        && isReqStr(data.provider, 1, 64)
+        && data.status in ['connected', 'disconnected', 'error']
+        && isOptStr(data.get('accountEmail', null), 254)
+        && isOptStr(data.get('lastSyncedAt', null), 64)
+        && isOptStr(data.get('lastError', null), 500);
+    }
+
+    function isValidFolder(data) {
+      return data.keys().hasAll(['id', 'userUid', 'name', 'slug', 'isSystem', 'autoCreated', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'parentId', 'name', 'slug', 'category', 'description', 'isSystem', 'autoCreated', 'deletedAt', 'createdAt', 'updatedAt'])
+        && isNum(data.id)
+        && data.userUid == request.auth.uid
+        && isOptNum(data.get('parentId', null))
+        && isReqStr(data.name, 1, 80)
+        && isReqStr(data.slug, 1, 100)
+        && isOptStr(data.get('category', null), 64)
+        && isOptStr(data.get('description', null), 500)
+        && data.isSystem is bool
+        && data.autoCreated is bool
+        && isOptStr(data.get('deletedAt', null), 64);
+    }
+
+    function isValidProject(data) {
+      return data.keys().hasAll(['id', 'userUid', 'name', 'objectives', 'status', 'progressPercent', 'isPriority', 'autoCreated', 'lastActivityAt', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'folderId', 'name', 'description', 'category', 'objectives', 'status', 'progressPercent', 'targetDate', 'isPriority', 'autoCreated', 'lastActivityAt', 'deletedAt', 'createdAt', 'updatedAt'])
+        && isNum(data.id)
+        && data.userUid == request.auth.uid
+        && isOptNum(data.get('folderId', null))
+        && isReqStr(data.name, 1, 120)
+        && isOptStr(data.get('description', null), 2000)
+        && isOptStr(data.get('category', null), 64)
+        && data.objectives is list
+        && data.objectives.size() <= 50
+        && data.status in ['idea', 'active', 'paused', 'completed', 'archived']
+        && isNum(data.progressPercent)
+        && data.progressPercent >= 0 && data.progressPercent <= 100
+        && isOptStr(data.get('targetDate', null), 64)
+        && data.isPriority is bool
+        && data.autoCreated is bool
+        && isReqStr(data.lastActivityAt, 1, 64)
+        && isOptStr(data.get('deletedAt', null), 64);
+    }
+
+    function isValidConversation(data) {
+      return data.keys().hasAll(['id', 'userUid', 'title', 'isArchived', 'lastMessageAt', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'projectId', 'title', 'contextSummary', 'isArchived', 'lastMessageAt', 'deletedAt', 'createdAt', 'updatedAt'])
+        && isNum(data.id)
+        && data.userUid == request.auth.uid
+        && isOptNum(data.get('projectId', null))
+        && isReqStr(data.title, 1, 120)
+        && isOptStr(data.get('contextSummary', null), 2000)
+        && data.isArchived is bool
+        && isReqStr(data.lastMessageAt, 1, 64)
+        && isOptStr(data.get('deletedAt', null), 64);
+    }
+
+    function isValidMessage(data) {
+      return data.keys().hasAll(['id', 'userUid', 'conversationId', 'role', 'content', 'processingStatus', 'metadata', 'attachments', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'conversationId', 'role', 'content', 'processingStatus', 'errorMessage', 'editedAt', 'metadata', 'attachments', 'deletedAt', 'createdAt', 'updatedAt'])
+        && isNum(data.id)
+        && data.userUid == request.auth.uid
+        && isNum(data.conversationId)
+        && data.role in ['user', 'assistant', 'system']
+        && isReqStr(data.content, 1, 65000)
+        && data.processingStatus in ['received', 'processing', 'analyzed', 'organized', 'pending_confirmation', 'error']
+        && isOptStr(data.get('errorMessage', null), 1000)
+        && isOptStr(data.get('editedAt', null), 64)
+        && data.metadata is map
+        && data.attachments is list
+        && data.attachments.size() <= 20
+        && isOptStr(data.get('deletedAt', null), 64);
+    }
+
+    function isValidFile(data) {
+      return data.keys().hasAll(['id', 'userUid', 'storagePath', 'originalName', 'displayName', 'mimeType', 'sizeBytes', 'fileKind', 'processingStatus', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'folderId', 'projectId', 'storagePath', 'originalName', 'displayName', 'mimeType', 'sizeBytes', 'fileKind', 'extractedText', 'aiSummary', 'detectedCategory', 'classificationConfidence', 'processingStatus', 'errorMessage', 'embedding', 'deletedAt', 'createdAt', 'updatedAt'])
+        && isNum(data.id)
+        && data.userUid == request.auth.uid
+        && isOptNum(data.get('folderId', null))
+        && isOptNum(data.get('projectId', null))
+        && isReqStr(data.storagePath, 1, 512)
+        && isReqStr(data.originalName, 1, 200)
+        && isReqStr(data.displayName, 1, 200)
+        && isReqStr(data.mimeType, 1, 120)
+        && isNum(data.sizeBytes)
+        && data.fileKind in ['image', 'pdf', 'document', 'audio', 'link', 'other']
+        && isOptStr(data.get('extractedText', null), 65000)
+        && isOptStr(data.get('aiSummary', null), 16000)
+        && isOptStr(data.get('detectedCategory', null), 64)
+        && isOptNum(data.get('classificationConfidence', null))
+        && isReqStr(data.processingStatus, 1, 40)
+        && isOptStr(data.get('errorMessage', null), 1000)
+        && (data.get('embedding', null) == null || (data.embedding is list && data.embedding.size() <= 4096))
+        && isOptStr(data.get('deletedAt', null), 64);
+    }
+
+    function isValidMemory(data) {
+      return data.keys().hasAll(['id', 'userUid', 'memoryLayer', 'originKind', 'category', 'content', 'tags', 'entities', 'importance', 'confidence', 'isActive', 'sourceType', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'memoryLayer', 'originKind', 'category', 'title', 'content', 'tags', 'entities', 'importance', 'confidence', 'isActive', 'projectId', 'folderId', 'sourceType', 'sourceConversationId', 'sourceMessageId', 'sourceFileId', 'expiresAt', 'embedding', 'deletedAt', 'createdAt', 'updatedAt'])
+        && isNum(data.id)
+        && data.userUid == request.auth.uid
+        && data.memoryLayer in ['episodic', 'semantic', 'project', 'temporal']
+        && isReqStr(data.originKind, 1, 32)
+        && isReqStr(data.category, 1, 64)
+        && isOptStr(data.get('title', null), 200)
+        && isReqStr(data.content, 1, 16000)
+        && data.tags is list && data.tags.size() <= 16
+        && data.entities is list && data.entities.size() <= 20
+        && isNum(data.importance) && data.importance >= 1 && data.importance <= 5
+        && isNum(data.confidence) && data.confidence >= 0 && data.confidence <= 1
+        && data.isActive is bool
+        && isOptNum(data.get('projectId', null))
+        && isOptNum(data.get('folderId', null))
+        && isReqStr(data.sourceType, 1, 32)
+        && isOptNum(data.get('sourceConversationId', null))
+        && isOptNum(data.get('sourceMessageId', null))
+        && isOptNum(data.get('sourceFileId', null))
+        && isOptStr(data.get('expiresAt', null), 64)
+        && (data.get('embedding', null) == null || (data.embedding is list && data.embedding.size() <= 4096))
+        && isOptStr(data.get('deletedAt', null), 64);
+    }
+
+    function isValidTask(data) {
+      return data.keys().hasAll(['id', 'userUid', 'title', 'kind', 'status', 'priority', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'projectId', 'title', 'description', 'kind', 'status', 'priority', 'dueAt', 'completedAt', 'sourceMessageId', 'sourceFileId', 'deletedAt', 'createdAt', 'updatedAt'])
+        && isNum(data.id)
+        && data.userUid == request.auth.uid
+        && isOptNum(data.get('projectId', null))
+        && isReqStr(data.title, 1, 180)
+        && isOptStr(data.get('description', null), 2000)
+        && data.kind in ['task', 'deadline', 'reminder']
+        && data.status in ['pending', 'in_progress', 'done', 'cancelled']
+        && data.priority in ['low', 'medium', 'high', 'urgent']
+        && isOptStr(data.get('dueAt', null), 64)
+        && isOptStr(data.get('completedAt', null), 64)
+        && isOptNum(data.get('sourceMessageId', null))
+        && isOptNum(data.get('sourceFileId', null))
+        && isOptStr(data.get('deletedAt', null), 64);
+    }
+
+    function isValidCalendarEvent(data) {
+      return data.keys().hasAll(['id', 'userUid', 'externalProvider', 'syncStatus', 'title', 'startAt', 'endAt', 'allDay', 'timezone', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'projectId', 'externalProvider', 'externalEventId', 'syncStatus', 'title', 'description', 'category', 'location', 'startAt', 'endAt', 'allDay', 'timezone', 'sourceMessageId', 'sourceFileId', 'linkedMemoryEventId', 'deletedAt', 'createdAt', 'updatedAt'])
+        && isNum(data.id)
+        && data.userUid == request.auth.uid
+        && isOptNum(data.get('projectId', null))
+        && isReqStr(data.externalProvider, 1, 32)
+        && isOptStr(data.get('externalEventId', null), 256)
+        && isReqStr(data.syncStatus, 1, 32)
+        && isReqStr(data.title, 1, 180)
+        && isOptStr(data.get('description', null), 2000)
+        && isOptStr(data.get('category', null), 64)
+        && isOptStr(data.get('location', null), 240)
+        && isReqStr(data.startAt, 1, 64)
+        && isReqStr(data.endAt, 1, 64)
+        && data.allDay is bool
+        && isReqStr(data.timezone, 1, 64)
+        && isOptNum(data.get('sourceMessageId', null))
+        && isOptNum(data.get('sourceFileId', null))
+        && isOptNum(data.get('linkedMemoryEventId', null))
+        && isOptStr(data.get('deletedAt', null), 64);
+    }
+
+    function isValidNoteFolder(data) {
+      return data.keys().hasAll(['id', 'userUid', 'name', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'parentId', 'name', 'color', 'deletedAt', 'createdAt', 'updatedAt'])
+        && isNum(data.id)
+        && data.userUid == request.auth.uid
+        && isOptNum(data.get('parentId', null))
+        && isReqStr(data.name, 1, 80)
+        && isOptStr(data.get('color', null), 24)
+        && isOptStr(data.get('deletedAt', null), 64);
+    }
+
+    function isValidNote(data) {
+      return data.keys().hasAll(['id', 'userUid', 'title', 'content', 'tags', 'isQuick', 'isPinned', 'isArchived', 'attachments', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'folderId', 'projectId', 'title', 'content', 'tags', 'isQuick', 'isPinned', 'isArchived', 'attachments', 'sourceConversationId', 'sourceMessageId', 'embedding', 'deletedAt', 'createdAt', 'updatedAt'])
+        && isNum(data.id)
+        && data.userUid == request.auth.uid
+        && isOptNum(data.get('folderId', null))
+        && isOptNum(data.get('projectId', null))
+        && isReqStr(data.title, 1, 200)
+        && isOptStr(data.content, 65000)
+        && data.tags is list && data.tags.size() <= 20
+        && data.isQuick is bool
+        && data.isPinned is bool
+        && data.isArchived is bool
+        && data.attachments is list && data.attachments.size() <= 20
+        && isOptNum(data.get('sourceConversationId', null))
+        && isOptNum(data.get('sourceMessageId', null))
+        && (data.get('embedding', null) == null || (data.embedding is list && data.embedding.size() <= 4096))
+        && isOptStr(data.get('deletedAt', null), 64);
+    }
+
+    function isValidMemoryEvent(data) {
+      return data.keys().hasAll(['id', 'userUid', 'title', 'description', 'datePrecision', 'category', 'people', 'relatedFileIds', 'relatedNoteIds', 'tags', 'importance', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'title', 'description', 'eventDate', 'datePrecision', 'dateLabel', 'category', 'people', 'projectId', 'sourceConversationId', 'sourceMessageId', 'sourceMessageText', 'relatedFileIds', 'relatedNoteIds', 'tags', 'importance', 'embedding', 'deletedAt', 'createdAt', 'updatedAt'])
+        && isNum(data.id)
+        && data.userUid == request.auth.uid
+        && isReqStr(data.title, 1, 200)
+        && isReqStr(data.description, 1, 16000)
+        && isOptStr(data.get('eventDate', null), 64)
+        && data.datePrecision in ['exact', 'day', 'approximate', 'unknown']
+        && isOptStr(data.get('dateLabel', null), 120)
+        && isReqStr(data.category, 1, 64)
+        && data.people is list && data.people.size() <= 30
+        && isOptNum(data.get('projectId', null))
+        && isOptNum(data.get('sourceConversationId', null))
+        && isOptNum(data.get('sourceMessageId', null))
+        && isOptStr(data.get('sourceMessageText', null), 4000)
+        && data.relatedFileIds is list && data.relatedFileIds.size() <= 30
+        && data.relatedNoteIds is list && data.relatedNoteIds.size() <= 30
+        && data.tags is list && data.tags.size() <= 20
+        && isNum(data.importance) && data.importance >= 1 && data.importance <= 5
+        && (data.get('embedding', null) == null || (data.embedding is list && data.embedding.size() <= 4096))
+        && isOptStr(data.get('deletedAt', null), 64);
+    }
+
+    function isValidPersonEntity(data) {
+      return data.keys().hasAll(['id', 'userUid', 'name', 'normalizedName', 'mentionCount', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'name', 'normalizedName', 'relationship', 'notes', 'mentionCount', 'lastMentionedAt', 'createdAt', 'updatedAt'])
+        && isNum(data.id)
+        && data.userUid == request.auth.uid
+        && isReqStr(data.name, 1, 120)
+        && isReqStr(data.normalizedName, 1, 120)
+        && isOptStr(data.get('relationship', null), 120)
+        && isOptStr(data.get('notes', null), 2000)
+        && isNum(data.mentionCount) && data.mentionCount >= 0
+        && isOptStr(data.get('lastMentionedAt', null), 64);
+    }
+
+    function isValidEventRelation(data) {
+      return data.keys().hasAll(['id', 'userUid', 'sourceEventId', 'targetType', 'targetId', 'targetLabel', 'relationKind', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'sourceEventId', 'targetType', 'targetId', 'targetLabel', 'relationKind', 'createdAt', 'updatedAt'])
+        && isNum(data.id)
+        && data.userUid == request.auth.uid
+        && isNum(data.sourceEventId)
+        && data.targetType in ['memory_event', 'person', 'project', 'note', 'file', 'calendar_event']
+        && isNum(data.targetId)
+        && isReqStr(data.targetLabel, 1, 200)
+        && isReqStr(data.relationKind, 1, 64);
+    }
+
+    function isValidSummaryRecord(data) {
+      return data.keys().hasAll(['id', 'userUid', 'periodKind', 'periodKey', 'periodStart', 'periodEnd', 'title', 'narrative', 'sections', 'generatedMode', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'periodKind', 'periodKey', 'periodStart', 'periodEnd', 'title', 'narrative', 'sections', 'generatedMode', 'savedNoteId', 'deletedAt', 'createdAt', 'updatedAt'])
+        && isNum(data.id)
+        && data.userUid == request.auth.uid
+        && data.periodKind in ['daily', 'weekly', 'monthly']
+        && isReqStr(data.periodKey, 1, 32)
+        && isReqStr(data.periodStart, 1, 64)
+        && isReqStr(data.periodEnd, 1, 64)
+        && isReqStr(data.title, 1, 200)
+        && isReqStr(data.narrative, 1, 65000)
+        && data.sections is map
+        && data.generatedMode in ['auto', 'manual']
+        && isOptNum(data.get('savedNoteId', null))
+        && isOptStr(data.get('deletedAt', null), 64);
+    }
+
+    function isValidSummarySource(data) {
+      return data.keys().hasAll(['id', 'userUid', 'summaryKind', 'summaryId', 'sourceType', 'sourceId', 'title', 'excerpt', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'summaryKind', 'summaryId', 'sourceType', 'sourceId', 'title', 'excerpt', 'sourceDate', 'createdAt', 'updatedAt'])
+        && isNum(data.id)
+        && data.userUid == request.auth.uid
+        && data.summaryKind in ['daily', 'weekly', 'monthly']
+        && isNum(data.summaryId)
+        && isReqStr(data.sourceType, 1, 32)
+        && isNum(data.sourceId)
+        && isReqStr(data.title, 1, 200)
+        && isReqStr(data.excerpt, 1, 1000)
+        && isOptStr(data.get('sourceDate', null), 64);
+    }
+
+    function isValidActionLog(data) {
+      return data.keys().hasAll(['id', 'userUid', 'toolName', 'status', 'inputPayload', 'outputPayload', 'requiresConfirmation', 'confirmedByUser', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'toolName', 'status', 'inputPayload', 'outputPayload', 'errorMessage', 'requiresConfirmation', 'confirmedByUser', 'createdAt', 'updatedAt'])
+        && isNum(data.id)
+        && data.userUid == request.auth.uid
+        && isReqStr(data.toolName, 1, 64)
+        && data.status in ['requested', 'confirmed', 'executed', 'failed', 'rejected']
+        && data.inputPayload is map
+        && data.outputPayload is map
+        && isOptStr(data.get('errorMessage', null), 1000)
+        && data.requiresConfirmation is bool
+        && data.confirmedByUser is bool;
+    }
+
+    function isValidKnowledgeConv(data) {
+      return data.keys().hasAll(['id', 'userUid', 'title', 'deepMode', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'title', 'deepMode', 'deletedAt', 'createdAt', 'updatedAt'])
+        && isNum(data.id)
+        && data.userUid == request.auth.uid
+        && isReqStr(data.title, 1, 160)
+        && data.deepMode is bool
+        && isOptStr(data.get('deletedAt', null), 64);
+    }
+
+    function isValidKnowledgeMsg(data) {
+      return data.keys().hasAll(['id', 'userUid', 'conversationId', 'role', 'content', 'deepMode', 'citations', 'metadata', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'conversationId', 'role', 'content', 'deepMode', 'citations', 'metadata', 'createdAt', 'updatedAt'])
+        && isNum(data.id)
+        && data.userUid == request.auth.uid
+        && isNum(data.conversationId)
+        && data.role in ['user', 'assistant']
+        && isReqStr(data.content, 1, 65000)
+        && data.deepMode is bool
+        && data.citations is list && data.citations.size() <= 30
+        && data.metadata is map;
+    }
+
+    function isValidAgent(data) {
+      return data.keys().hasAll(['id', 'userUid', 'name', 'icon', 'instructions', 'personality', 'responseStyle', 'depthLevel', 'toolsEnabled', 'memoryEnabled', 'permissionMode', 'allowedFolderIds', 'isArchived', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'name', 'description', 'icon', 'instructions', 'personality', 'objective', 'responseStyle', 'depthLevel', 'toolsEnabled', 'memoryEnabled', 'permissionMode', 'allowedFolderIds', 'isArchived', 'deletedAt', 'createdAt', 'updatedAt'])
+        && isNum(data.id)
+        && data.userUid == request.auth.uid
+        && isReqStr(data.name, 1, 100)
+        && isOptStr(data.get('description', null), 1000)
+        && isReqStr(data.icon, 1, 32)
+        && isOptStr(data.instructions, 16000)
+        && isOptStr(data.personality, 300)
+        && isOptStr(data.get('objective', null), 500)
+        && isOptStr(data.responseStyle, 300)
+        && data.depthLevel in ['concise', 'balanced', 'deep']
+        && data.toolsEnabled is list && data.toolsEnabled.size() <= 20
+        && data.memoryEnabled is bool
+        && data.permissionMode in ['docs_only', 'docs_and_agent_memory', 'docs_and_selected_folders', 'full_personal_memory']
+        && data.allowedFolderIds is list && data.allowedFolderIds.size() <= 50
+        && data.isArchived is bool
+        && isOptStr(data.get('deletedAt', null), 64);
+    }
+
+    function isValidAgentSource(data) {
+      return data.keys().hasAll(['id', 'userUid', 'agentId', 'fileName', 'mimeType', 'sizeBytes', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'agentId', 'fileName', 'mimeType', 'sizeBytes', 'storagePath', 'aiSummary', 'extractedText', 'embedding', 'deletedAt', 'createdAt', 'updatedAt'])
+        && isNum(data.id)
+        && data.userUid == request.auth.uid
+        && isNum(data.agentId)
+        && isReqStr(data.fileName, 1, 200)
+        && isReqStr(data.mimeType, 1, 120)
+        && isNum(data.sizeBytes)
+        && isOptStr(data.get('storagePath', null), 512)
+        && isOptStr(data.get('aiSummary', null), 16000)
+        && isOptStr(data.get('extractedText', null), 65000)
+        && (data.get('embedding', null) == null || (data.embedding is list && data.embedding.size() <= 4096))
+        && isOptStr(data.get('deletedAt', null), 64);
+    }
+
+    function isValidAgentMemory(data) {
+      return data.keys().hasAll(['id', 'userUid', 'agentId', 'content', 'category', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'agentId', 'content', 'category', 'createdAt', 'updatedAt'])
+        && isNum(data.id)
+        && data.userUid == request.auth.uid
+        && isNum(data.agentId)
+        && isReqStr(data.content, 1, 8000)
+        && isReqStr(data.category, 1, 64);
+    }
+
+    function isValidAgentConv(data) {
+      return data.keys().hasAll(['id', 'userUid', 'agentId', 'title', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'agentId', 'title', 'deletedAt', 'createdAt', 'updatedAt'])
+        && isNum(data.id)
+        && data.userUid == request.auth.uid
+        && isNum(data.agentId)
+        && isReqStr(data.title, 1, 160)
+        && isOptStr(data.get('deletedAt', null), 64);
+    }
+
+    function isValidAgentMsg(data) {
+      return data.keys().hasAll(['id', 'userUid', 'conversationId', 'agentId', 'role', 'content', 'citations', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'conversationId', 'agentId', 'role', 'content', 'citations', 'createdAt', 'updatedAt'])
+        && isNum(data.id)
+        && data.userUid == request.auth.uid
+        && isNum(data.conversationId)
+        && isNum(data.agentId)
+        && data.role in ['user', 'assistant']
+        && isReqStr(data.content, 1, 65000)
+        && data.citations is list && data.citations.size() <= 30;
+    }
+
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId) && (resource == null || existing().uid == request.auth.uid);
+      allow list: if false;
+      allow create: if isOwner(userId) && isValidId(userId) && isValidUserProfile(incoming())
+        && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isOwner(userId) && isValidId(userId) && isValidUserProfile(incoming())
+        && incoming().uid == existing().uid
+        && incoming().email == existing().email
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'avatarUrl', 'language', 'timezone', 'updatedAt']);
+      allow delete: if false;
+
+      match /preferences/{prefId} {
+        allow get: if isOwner(userId) && isValidId(prefId) && (resource == null || existing().userUid == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(prefId) && isValidPreferences(incoming())
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId) && isValidId(prefId) && isValidPreferences(incoming())
+          && incoming().userUid == existing().userUid
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'theme', 'accentColor', 'uiDensity', 'autonomyLevel', 'autoCreateCalendarEvents',
+            'autoClassifyThreshold', 'proactiveNotificationsEnabled', 'quietHoursStart',
+            'quietHoursEnd', 'disabledMemoryCategories', 'customEventCategories', 'updatedAt'
+          ]);
+        allow delete: if false;
+      }
+
+      match /integrations/{intId} {
+        allow get: if isOwner(userId) && isValidId(intId) && (resource == null || existing().userUid == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(intId) && isValidIntegration(incoming())
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId) && isValidId(intId) && isValidIntegration(incoming())
+          && incoming().id == existing().id && incoming().userUid == existing().userUid
+          && incoming().provider == existing().provider
+          && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'accountEmail', 'lastSyncedAt', 'lastError', 'updatedAt']);
+        allow delete: if false;
+      }
+
+      match /folders/{folderId} {
+        allow get: if isOwner(userId) && isValidId(folderId) && (resource == null || existing().userUid == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(folderId) && isValidFolder(incoming())
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId) && isValidId(folderId) && isValidFolder(incoming())
+          && incoming().id == existing().id && incoming().userUid == existing().userUid
+          && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['parentId', 'name', 'slug', 'category', 'description', 'deletedAt', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(folderId) && existing().userUid == request.auth.uid && !existing().isSystem;
+      }
+
+      match /projects/{projectId} {
+        allow get: if isOwner(userId) && isValidId(projectId) && (resource == null || existing().userUid == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(projectId) && isValidProject(incoming())
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId) && isValidId(projectId) && isValidProject(incoming())
+          && incoming().id == existing().id && incoming().userUid == existing().userUid
+          && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['folderId', 'name', 'description', 'category', 'objectives', 'status', 'progressPercent', 'targetDate', 'isPriority', 'lastActivityAt', 'deletedAt', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(projectId) && existing().userUid == request.auth.uid;
+      }
+
+      match /conversations/{convId} {
+        allow get: if isOwner(userId) && isValidId(convId) && (resource == null || existing().userUid == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(convId) && isValidConversation(incoming())
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId) && isValidId(convId) && isValidConversation(incoming())
+          && incoming().id == existing().id && incoming().userUid == existing().userUid
+          && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['projectId', 'title', 'contextSummary', 'isArchived', 'lastMessageAt', 'deletedAt', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(convId) && existing().userUid == request.auth.uid;
+      }
+
+      match /messages/{msgId} {
+        allow get: if isOwner(userId) && isValidId(msgId) && (resource == null || existing().userUid == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(msgId) && isValidMessage(incoming())
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId) && isValidId(msgId) && isValidMessage(incoming())
+          && incoming().id == existing().id && incoming().userUid == existing().userUid
+          && incoming().conversationId == existing().conversationId && incoming().role == existing().role
+          && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['content', 'processingStatus', 'errorMessage', 'editedAt', 'metadata', 'attachments', 'deletedAt', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(msgId) && existing().userUid == request.auth.uid;
+      }
+
+      match /files/{fileId} {
+        allow get: if isOwner(userId) && isValidId(fileId) && (resource == null || existing().userUid == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(fileId) && isValidFile(incoming())
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId) && isValidId(fileId) && isValidFile(incoming())
+          && incoming().id == existing().id && incoming().userUid == existing().userUid
+          && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['folderId', 'projectId', 'displayName', 'extractedText', 'aiSummary', 'detectedCategory', 'classificationConfidence', 'processingStatus', 'errorMessage', 'embedding', 'deletedAt', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(fileId) && existing().userUid == request.auth.uid;
+      }
+
+      match /memories/{memId} {
+        allow get: if isOwner(userId) && isValidId(memId) && (resource == null || existing().userUid == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(memId) && isValidMemory(incoming())
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId) && isValidId(memId) && isValidMemory(incoming())
+          && incoming().id == existing().id && incoming().userUid == existing().userUid
+          && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['memoryLayer', 'originKind', 'category', 'title', 'content', 'tags', 'entities', 'importance', 'confidence', 'isActive', 'projectId', 'folderId', 'expiresAt', 'embedding', 'deletedAt', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(memId) && existing().userUid == request.auth.uid;
+      }
+
+      match /tasks/{taskId} {
+        allow get: if isOwner(userId) && isValidId(taskId) && (resource == null || existing().userUid == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(taskId) && isValidTask(incoming())
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId) && isValidId(taskId) && isValidTask(incoming())
+          && incoming().id == existing().id && incoming().userUid == existing().userUid
+          && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['projectId', 'title', 'description', 'kind', 'status', 'priority', 'dueAt', 'completedAt', 'deletedAt', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(taskId) && existing().userUid == request.auth.uid;
+      }
+
+      match /calendarEvents/{eventId} {
+        allow get: if isOwner(userId) && isValidId(eventId) && (resource == null || existing().userUid == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(eventId) && isValidCalendarEvent(incoming())
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId) && isValidId(eventId) && isValidCalendarEvent(incoming())
+          && incoming().id == existing().id && incoming().userUid == existing().userUid
+          && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['projectId', 'externalProvider', 'externalEventId', 'syncStatus', 'title', 'description', 'category', 'location', 'startAt', 'endAt', 'allDay', 'timezone', 'linkedMemoryEventId', 'deletedAt', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(eventId) && existing().userUid == request.auth.uid;
+      }
+
+      match /noteFolders/{folderId} {
+        allow get: if isOwner(userId) && isValidId(folderId) && (resource == null || existing().userUid == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(folderId) && isValidNoteFolder(incoming())
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId) && isValidId(folderId) && isValidNoteFolder(incoming())
+          && incoming().id == existing().id && incoming().userUid == existing().userUid
+          && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['parentId', 'name', 'color', 'deletedAt', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(folderId) && existing().userUid == request.auth.uid;
+      }
+
+      match /notes/{noteId} {
+        allow get: if isOwner(userId) && isValidId(noteId) && (resource == null || existing().userUid == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(noteId) && isValidNote(incoming())
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId) && isValidId(noteId) && isValidNote(incoming())
+          && incoming().id == existing().id && incoming().userUid == existing().userUid
+          && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['folderId', 'projectId', 'title', 'content', 'tags', 'isQuick', 'isPinned', 'isArchived', 'attachments', 'embedding', 'deletedAt', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(noteId) && existing().userUid == request.auth.uid;
+      }
+
+      match /memoryEvents/{mevId} {
+        allow get: if isOwner(userId) && isValidId(mevId) && (resource == null || existing().userUid == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(mevId) && isValidMemoryEvent(incoming())
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId) && isValidId(mevId) && isValidMemoryEvent(incoming())
+          && incoming().id == existing().id && incoming().userUid == existing().userUid
+          && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'eventDate', 'datePrecision', 'dateLabel', 'category', 'people', 'projectId', 'relatedFileIds', 'relatedNoteIds', 'tags', 'importance', 'embedding', 'deletedAt', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(mevId) && existing().userUid == request.auth.uid;
+      }
+
+      match /peopleEntities/{personId} {
+        allow get: if isOwner(userId) && isValidId(personId) && (resource == null || existing().userUid == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(personId) && isValidPersonEntity(incoming())
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId) && isValidId(personId) && isValidPersonEntity(incoming())
+          && incoming().id == existing().id && incoming().userUid == existing().userUid
+          && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'normalizedName', 'relationship', 'notes', 'mentionCount', 'lastMentionedAt', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(personId) && existing().userUid == request.auth.uid;
+      }
+
+      match /eventRelations/{relId} {
+        allow get: if isOwner(userId) && isValidId(relId) && (resource == null || existing().userUid == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(relId) && isValidEventRelation(incoming())
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if false;
+        allow delete: if isOwner(userId) && isValidId(relId) && existing().userUid == request.auth.uid;
+      }
+
+      match /dailySummaries/{sumId} {
+        allow get: if isOwner(userId) && isValidId(sumId) && (resource == null || existing().userUid == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(sumId) && isValidSummaryRecord(incoming())
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId) && isValidId(sumId) && isValidSummaryRecord(incoming())
+          && incoming().id == existing().id && incoming().userUid == existing().userUid
+          && incoming().periodKind == existing().periodKind && incoming().periodKey == existing().periodKey
+          && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'narrative', 'sections', 'generatedMode', 'savedNoteId', 'deletedAt', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(sumId) && existing().userUid == request.auth.uid;
+      }
+
+      match /weeklySummaries/{sumId} {
+        allow get: if isOwner(userId) && isValidId(sumId) && (resource == null || existing().userUid == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(sumId) && isValidSummaryRecord(incoming())
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId) && isValidId(sumId) && isValidSummaryRecord(incoming())
+          && incoming().id == existing().id && incoming().userUid == existing().userUid
+          && incoming().periodKind == existing().periodKind && incoming().periodKey == existing().periodKey
+          && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'narrative', 'sections', 'generatedMode', 'savedNoteId', 'deletedAt', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(sumId) && existing().userUid == request.auth.uid;
+      }
+
+      match /monthlySummaries/{sumId} {
+        allow get: if isOwner(userId) && isValidId(sumId) && (resource == null || existing().userUid == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(sumId) && isValidSummaryRecord(incoming())
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId) && isValidId(sumId) && isValidSummaryRecord(incoming())
+          && incoming().id == existing().id && incoming().userUid == existing().userUid
+          && incoming().periodKind == existing().periodKind && incoming().periodKey == existing().periodKey
+          && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'narrative', 'sections', 'generatedMode', 'savedNoteId', 'deletedAt', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(sumId) && existing().userUid == request.auth.uid;
+      }
+
+      match /summarySources/{srcId} {
+        allow get: if isOwner(userId) && isValidId(srcId) && (resource == null || existing().userUid == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(srcId) && isValidSummarySource(incoming())
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if false;
+        allow delete: if isOwner(userId) && isValidId(srcId) && existing().userUid == request.auth.uid;
+      }
+
+      match /actionsLog/{actionId} {
+        allow get: if isOwner(userId) && isValidId(actionId) && (resource == null || existing().userUid == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(actionId) && isValidActionLog(incoming())
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId) && isValidId(actionId) && isValidActionLog(incoming())
+          && incoming().id == existing().id && incoming().userUid == existing().userUid
+          && incoming().toolName == existing().toolName
+          && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'outputPayload', 'errorMessage', 'confirmedByUser', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(actionId) && existing().userUid == request.auth.uid;
+      }
+
+      match /knowledgeConversations/{kcId} {
+        allow get: if isOwner(userId) && isValidId(kcId) && (resource == null || existing().userUid == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(kcId) && isValidKnowledgeConv(incoming())
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId) && isValidId(kcId) && isValidKnowledgeConv(incoming())
+          && incoming().id == existing().id && incoming().userUid == existing().userUid
+          && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'deepMode', 'deletedAt', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(kcId) && existing().userUid == request.auth.uid;
+      }
+
+      match /knowledgeMessages/{kmId} {
+        allow get: if isOwner(userId) && isValidId(kmId) && (resource == null || existing().userUid == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(kmId) && isValidKnowledgeMsg(incoming())
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if false;
+        allow delete: if isOwner(userId) && isValidId(kmId) && existing().userUid == request.auth.uid;
+      }
+
+      match /agents/{agentId} {
+        allow get: if isOwner(userId) && isValidId(agentId) && (resource == null || existing().userUid == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(agentId) && isValidAgent(incoming())
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId) && isValidId(agentId) && isValidAgent(incoming())
+          && incoming().id == existing().id && incoming().userUid == existing().userUid
+          && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'description', 'icon', 'instructions', 'personality', 'objective', 'responseStyle', 'depthLevel', 'toolsEnabled', 'memoryEnabled', 'permissionMode', 'allowedFolderIds', 'isArchived', 'deletedAt', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(agentId) && existing().userUid == request.auth.uid;
+      }
+
+      match /agentSources/{srcId} {
+        allow get: if isOwner(userId) && isValidId(srcId) && (resource == null || existing().userUid == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(srcId) && isValidAgentSource(incoming())
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId) && isValidId(srcId) && isValidAgentSource(incoming())
+          && incoming().id == existing().id && incoming().userUid == existing().userUid
+          && incoming().agentId == existing().agentId
+          && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['deletedAt', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(srcId) && existing().userUid == request.auth.uid;
+      }
+
+      match /agentMemories/{amId} {
+        allow get: if isOwner(userId) && isValidId(amId) && (resource == null || existing().userUid == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(amId) && isValidAgentMemory(incoming())
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if false;
+        allow delete: if isOwner(userId) && isValidId(amId) && existing().userUid == request.auth.uid;
+      }
+
+      match /agentConversations/{acId} {
+        allow get: if isOwner(userId) && isValidId(acId) && (resource == null || existing().userUid == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(acId) && isValidAgentConv(incoming())
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId) && isValidId(acId) && isValidAgentConv(incoming())
+          && incoming().id == existing().id && incoming().userUid == existing().userUid
+          && incoming().agentId == existing().agentId
+          && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'deletedAt', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(acId) && existing().userUid == request.auth.uid;
+      }
+
+      match /agentMessages/{amsgId} {
+        allow get: if isOwner(userId) && isValidId(amsgId) && (resource == null || existing().userUid == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(amsgId) && isValidAgentMsg(incoming())
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if false;
+        allow delete: if isOwner(userId) && isValidId(amsgId) && existing().userUid == request.auth.uid;
+      }
+    }
+  }
+}
