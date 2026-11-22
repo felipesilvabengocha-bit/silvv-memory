@@ -417,6 +417,7 @@ export interface NoteOrganizationResult {
   title: string;
   category: 'Estudios' | 'Vida diaria';
   subfolderName: string;
+  tags: string[];
 }
 
 export async function generateNoteOrganization(content: string): Promise<NoteOrganizationResult> {
@@ -441,6 +442,7 @@ export async function generateNoteOrganization(content: string): Promise<NoteOrg
         'Asigna exactamente una categoría raíz: Estudios para apuntes, materias, clases, tareas o aprendizaje académico; Vida diaria para experiencias personales, relaciones, rutinas, trabajo, ideas y cualquier otro contenido.',
         'Si el texto mezcla temas, elige la categoría dominante y no lo asignes a ambas. Ante una clasificación ambigua, elige Vida diaria.',
         'Sugiere una subcarpeta breve y reutilizable de 1 a 3 palabras si aporta valor. No uses el nombre de la categoría como subcarpeta; si no hace falta, devuelve una cadena vacía.',
+        'Genera entre 2 y 4 etiquetas breves en español, sin #, con conceptos específicos y reutilizables; evita etiquetas genéricas como nota o personal.',
       ].join('\n'),
       responseMimeType: 'application/json',
       responseSchema: {
@@ -449,8 +451,9 @@ export async function generateNoteOrganization(content: string): Promise<NoteOrg
           title: { type: Type.STRING },
           category: { type: Type.STRING, enum: ['Estudios', 'Vida diaria'] },
           subfolderName: { type: Type.STRING },
+          tags: { type: Type.ARRAY, items: { type: Type.STRING } },
         },
-        required: ['title', 'category', 'subfolderName'],
+        required: ['title', 'category', 'subfolderName', 'tags'],
       },
     },
     primaryThinkingLevel: ThinkingLevel.MINIMAL,
@@ -469,11 +472,24 @@ export async function generateNoteOrganization(content: string): Promise<NoteOrg
     ?.trim()
     .replace(/\s+/g, ' ')
     .slice(0, 48) || '';
+  const category = parsed.category === 'Estudios' ? 'Estudios' : 'Vida diaria';
+  const tags = Array.isArray(parsed.tags)
+    ? Array.from(
+        new Map(
+          parsed.tags
+            .filter((tag): tag is string => typeof tag === 'string')
+            .map((tag) => tag.replace(/^#+/, '').trim().replace(/\s+/g, ' ').slice(0, 32))
+            .filter(Boolean)
+            .map((tag) => [tag.toLocaleLowerCase('es'), tag] as const),
+        ).values(),
+      ).slice(0, 4)
+    : [];
 
   return {
     title: title.slice(0, 80),
-    category: parsed.category === 'Estudios' ? 'Estudios' : 'Vida diaria',
+    category,
     subfolderName,
+    tags: tags.length > 0 ? tags : [subfolderName || category],
   };
 }
 
