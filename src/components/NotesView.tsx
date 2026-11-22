@@ -496,7 +496,7 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
     };
   }, [activeNote?.id, activeNote?.title, draftContent, editorOpen]);
 
-  const handleCloseEditor = async () => {
+  const handleCloseEditor = () => {
     if (!activeNote) {
       setEditorOpen(false);
       return;
@@ -510,38 +510,34 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
     const parsedTags = draftTagsText.split(',').map((tag) => tag.trim()).filter(Boolean);
     const titleToSave = draftContent.trim() ? draftTitle.trim() || 'Nota nueva' : 'Nueva nota';
     const originalTags = activeNote.tags || [];
+    const contentChanged = draftContent !== activeNote.content;
     const changed =
       titleToSave !== activeNote.title ||
-      draftContent !== activeNote.content ||
+      contentChanged ||
       draftFolderId !== (activeNote.folderId ?? null) ||
       parsedTags.length !== originalTags.length ||
       parsedTags.some((tag, index) => tag !== originalTags[index]);
 
-    if (changed) {
-      setSaveState('saving');
-      try {
-        const updated = await apiRequest<NoteItem>(`/api/notes/${activeNote.id}`, {
-          method: 'PATCH',
-          body: JSON.stringify({
-            title: titleToSave,
-            content: draftContent,
-            folderId: draftFolderId,
-            tags: parsedTags,
-            recomputeEmbedding: true,
-          }),
-        });
-        setNotes((previous) => previous.map((note) => (note.id === updated.id ? updated : note)));
-        setDraftTitle(titleToSave);
-        setSaveState('saved');
-        onDataChanged();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'No se pudieron guardar los últimos cambios.');
-        setSaveState('idle');
-        return;
-      }
-    }
-
     setEditorOpen(false);
+    if (!changed) return;
+
+    void apiRequest<NoteItem>(`/api/notes/${activeNote.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        title: titleToSave,
+        content: draftContent,
+        folderId: draftFolderId,
+        tags: parsedTags,
+        recomputeEmbedding: contentChanged,
+      }),
+    })
+      .then((updated) => {
+        setNotes((previous) => previous.map((note) => (note.id === updated.id ? updated : note)));
+        onDataChanged();
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : 'No se pudieron guardar los últimos cambios.');
+      });
   };
 
   const handleCreateNote = async (isQuick = false, customText?: string) => {
@@ -550,10 +546,6 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
     setError(null);
     try {
       const content = isQuick ? (customText || '').trim() : '';
-      const pendingFolderSetup = smartRootFoldersPromiseRef.current;
-      if (pendingFolderSetup) {
-        foldersRef.current = await pendingFolderSetup.catch(() => foldersRef.current);
-      }
       const selectedFolder =
         typeof selectedFolderId === 'number'
           ? foldersRef.current.find((folder) => folder.id === selectedFolderId)
@@ -562,11 +554,13 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
         typeof selectedFolderId === 'number'
           ? getSmartCategoryForFolder(foldersRef.current, selectedFolderId)
           : null;
-      const category = selectedCategory || 'Vida diaria';
-      const defaultPath = await ensureSmartFolderPath(foldersRef.current, category, '');
-      const folderId = selectedCategory && selectedFolder ? selectedFolder.id : defaultPath.folderId;
-      foldersRef.current = defaultPath.folders;
-      setFolders(defaultPath.folders);
+      const defaultCategory = selectedCategory || 'Vida diaria';
+      const existingRoot = foldersRef.current.find(
+        (folder) =>
+          folder.parentId == null &&
+          normalizeFolderName(folder.name) === normalizeFolderName(defaultCategory),
+      );
+      const folderId = selectedCategory && selectedFolder ? selectedFolder.id : existingRoot?.id ?? null;
 
       const title = 'Generando título…';
       const created = await apiRequest<NoteItem>('/api/notes', {
@@ -1239,7 +1233,7 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
           <div
             className={
               editorOpen
-                ? 'h-full min-h-0 w-full glass-panel rounded-none border-0 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] sm:px-8 flex flex-col gap-4 overflow-y-auto lg:animate-silvv-editor-in'
+                ? 'h-full min-h-0 w-full glass-panel rounded-none border-0 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] sm:px-8 flex flex-col gap-4 overflow-hidden lg:animate-silvv-editor-in'
                 : 'xl:col-span-7 glass-panel rounded-2xl p-5 flex flex-col gap-4 min-h-[560px]'
             }
           >
@@ -1264,7 +1258,7 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
                   <div className="flex flex-1 items-center gap-3 min-w-0">
                   <button
                     type="button"
-                    onClick={() => void handleCloseEditor()}
+                      onClick={handleCloseEditor}
                     aria-label="Volver al historial de notas"
                     title="Volver al historial"
                     className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl glass-subtle text-zinc-600 dark:text-zinc-300 transition-colors hover:text-zinc-950 dark:hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
@@ -1403,7 +1397,7 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
                 </section>
 
                 {previewMode ? (
-                  <div className={`flex-1 ${editorOpen ? 'min-h-[140px]' : 'min-h-[260px]'} p-4 rounded-xl glass-subtle overflow-y-auto`}>
+                  <div className={`flex-1 ${editorOpen ? 'min-h-0' : 'min-h-[260px]'} p-4 rounded-xl glass-subtle overflow-y-auto`}>
                     <MarkdownRenderer content={draftContent || '*Nota vacía.*'} />
                   </div>
                 ) : (
@@ -1412,12 +1406,12 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
                     value={draftContent}
                     onChange={(e) => setDraftContent(e.target.value)}
                     placeholder="Escribí libremente tus ideas, apuntes, borradores o listas (admite Markdown)..."
-                    className={`flex-1 ${editorOpen ? 'min-h-[140px]' : 'min-h-[260px]'} w-full resize-none p-4 rounded-xl border border-zinc-200/80 dark:border-white/10 bg-white/60 dark:bg-black/25 text-base sm:text-sm text-zinc-900 dark:text-zinc-100 leading-relaxed focus:outline-none focus:ring-2 focus:ring-violet-500/35`}
+                    className={`flex-1 ${editorOpen ? 'min-h-0 rounded-none border-0 bg-transparent p-1 focus:ring-0' : 'min-h-[260px] rounded-xl border border-zinc-200/80 dark:border-white/10 bg-white/60 dark:bg-black/25 p-4 focus:ring-2 focus:ring-violet-500/35'} w-full resize-none text-base sm:text-sm text-zinc-900 dark:text-zinc-100 leading-relaxed focus:outline-none`}
                   />
                 )}
 
                 {/* Attachments */}
-                <div className="pt-3 border-t border-zinc-200/70 dark:border-white/10 space-y-2.5">
+                <div className={`shrink-0 pt-3 border-t border-zinc-200/70 dark:border-white/10 space-y-2.5 ${editorOpen ? 'max-h-[20vh] overflow-y-auto' : ''}`}>
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-medium text-zinc-600 dark:text-zinc-300">
                       Adjuntos ({activeNote.attachments?.length || 0})

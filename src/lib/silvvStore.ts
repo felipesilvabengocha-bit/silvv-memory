@@ -2343,13 +2343,15 @@ export async function dispatchSilvvRequest<T>(rawPath: string, options: RequestI
       const title = (rawTitle || (rawContent.trim().split('\n')[0] || 'Nota rápida')).slice(0, 200);
       const content = rawContent.slice(0, 65000);
 
-      const embRes = await withRaceTimeout(
-        callServerEndpoint<{ embedding: number[] | null }>('/api/ai/embed', 'POST', {
-          text: `${title}\n${content}`,
-        }).catch(() => ({ embedding: null })),
-        1800,
-        { embedding: null },
-      );
+      const embRes = content.trim()
+        ? await withRaceTimeout(
+            callServerEndpoint<{ embedding: number[] | null }>('/api/ai/embed', 'POST', {
+              text: `${title}\n${content}`,
+            }).catch(() => ({ embedding: null })),
+            1800,
+            { embedding: null },
+          )
+        : { embedding: null };
 
       const id = nextNumericId();
       const nowIso = new Date().toISOString();
