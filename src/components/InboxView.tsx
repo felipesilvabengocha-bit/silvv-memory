@@ -1118,7 +1118,7 @@ export function InboxView({
                   }
                 }}
                 placeholder="Escribí a SILVV MEMORY..."
-                className="flex-1 min-w-0 resize-none px-4 py-2.5 min-h-[44px] max-h-36 rounded-xl border border-zinc-200/80 dark:border-white/10 bg-white/80 dark:bg-black/35 text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+                className="flex-1 min-w-0 resize-none px-4 py-2.5 min-h-[44px] max-h-36 rounded-xl border border-zinc-200/80 dark:border-white/10 bg-white/80 dark:bg-black/35 text-base text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-violet-500/40 sm:text-sm"
               />
 
               <button
