@@ -12,9 +12,10 @@
     --silvv-text: 24 24 27;
     --silvv-muted: 113 113 122;
     --silvv-accent: 124 58 237;
-    --silvv-motion-fast: 140ms;
-    --silvv-motion-standard: 220ms;
-    --silvv-motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --silvv-motion-fast: 180ms;
+    --silvv-motion-standard: 280ms;
+    --silvv-motion-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --silvv-motion-spring: cubic-bezier(0.16, 1, 0.3, 1);
     --silvv-glass-blur: 16px;
     color-scheme: light;
   }
@@ -150,16 +151,31 @@
 @keyframes silvvFadeSlideUp {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translate3d(0, 10px, 0) scale(0.992);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translate3d(0, 0, 0) scale(1);
   }
 }
 
 .animate-silvv-in {
-  animation: silvvFadeSlideUp var(--silvv-motion-standard) var(--silvv-motion-ease) both;
+  animation: silvvFadeSlideUp var(--silvv-motion-standard) var(--silvv-motion-spring) both;
+}
+
+.silvv-view-transition,
+.animate-silvv-view-in {
+  animation: silvvFadeSlideUp 360ms var(--silvv-motion-spring) both;
+  backface-visibility: hidden;
+}
+
+@keyframes silvvOverlayIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-silvv-overlay-in {
+  animation: silvvOverlayIn 220ms ease-out both;
 }
 
 @keyframes silvvEditorOpen {
@@ -180,16 +196,16 @@
 @keyframes silvvPanelEnter {
   from {
     opacity: 0;
-    transform: translateX(-10px);
+    transform: translate3d(-16px, 0, 0) scale(0.99);
   }
   to {
     opacity: 1;
-    transform: translateX(0);
+    transform: translate3d(0, 0, 0) scale(1);
   }
 }
 
 .animate-silvv-panel-in {
-  animation: silvvPanelEnter var(--silvv-motion-fast) var(--silvv-motion-ease) both;
+  animation: silvvPanelEnter 300ms var(--silvv-motion-spring) both;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -204,6 +220,34 @@
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  button:not(:disabled):hover {
+    transform: translate3d(0, -1px, 0);
+  }
+}
+
+button:not(:disabled):active {
+  transform: scale(0.975);
+}
+
+.glass-panel,
+.glass-elevated,
+.glass-subtle {
+  transition:
+    background-color var(--silvv-motion-standard) ease,
+    border-color var(--silvv-motion-standard) ease,
+    box-shadow var(--silvv-motion-standard) var(--silvv-motion-ease);
+}
+
+input,
+textarea,
+select {
+  transition:
+    border-color var(--silvv-motion-standard) ease,
+    box-shadow var(--silvv-motion-standard) var(--silvv-motion-ease),
+    background-color var(--silvv-motion-standard) ease;
 }
 
 /* Subtle custom scrollbars for dark/light workspace */

@@ -422,7 +422,7 @@ export default function App() {
           {/* Mobile Slide Drawer */}
           {mobileNavOpen && (
             <div
-              className="fixed inset-0 z-50 lg:hidden bg-black/55 backdrop-blur-xs"
+              className="fixed inset-0 z-50 lg:hidden bg-black/55 backdrop-blur-xs animate-silvv-overlay-in"
               onClick={() => setMobileNavOpen(false)}
             >
               <aside
@@ -543,6 +543,10 @@ export default function App() {
               }
             >
               <Suspense fallback={<ViewLoadingState isFullBleed={isFullBleedChat} />}>
+                <div
+                  key={activeTab}
+                  className={`silvv-view-transition ${isFullBleedChat ? 'h-full min-h-0' : ''}`}
+                >
               {activeTab === 'dashboard' && (
                 <DashboardView
                   data={dashboardData}
@@ -619,6 +623,7 @@ export default function App() {
                   onDataChanged={loadWorkspace}
                 />
               )}
+                </div>
               </Suspense>
             </main>
           </div>
