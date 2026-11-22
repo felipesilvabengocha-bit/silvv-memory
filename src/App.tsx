@@ -1,6 +1,15 @@
-import { Component, type ErrorInfo, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Component,
+  lazy,
+  Suspense,
+  type ErrorInfo,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
-import { MotionConfig } from 'motion/react';
 import {
   BookOpenText,
   Bot,
@@ -28,15 +37,32 @@ import {
 } from './lib/api';
 import { AuthScreen } from './components/AuthScreen';
 import { DashboardView, type NavTab } from './components/DashboardView';
-import { InboxView } from './components/InboxView';
-import { NotesView } from './components/NotesView';
-import { MemoryView } from './components/MemoryView';
-import { CalendarTasksView } from './components/CalendarTasksView';
-import { SummariesView } from './components/SummariesView';
-import { KnowledgeView } from './components/KnowledgeView';
-import { AgentsView } from './components/AgentsView';
-import { SettingsTrashView } from './components/SettingsTrashView';
 import { CommandSearchModal } from './components/CommandSearchModal';
+
+const InboxView = lazy(() =>
+  import('./components/InboxView').then((module) => ({ default: module.InboxView })),
+);
+const NotesView = lazy(() =>
+  import('./components/NotesView').then((module) => ({ default: module.NotesView })),
+);
+const MemoryView = lazy(() =>
+  import('./components/MemoryView').then((module) => ({ default: module.MemoryView })),
+);
+const CalendarTasksView = lazy(() =>
+  import('./components/CalendarTasksView').then((module) => ({ default: module.CalendarTasksView })),
+);
+const SummariesView = lazy(() =>
+  import('./components/SummariesView').then((module) => ({ default: module.SummariesView })),
+);
+const KnowledgeView = lazy(() =>
+  import('./components/KnowledgeView').then((module) => ({ default: module.KnowledgeView })),
+);
+const AgentsView = lazy(() =>
+  import('./components/AgentsView').then((module) => ({ default: module.AgentsView })),
+);
+const SettingsTrashView = lazy(() =>
+  import('./components/SettingsTrashView').then((module) => ({ default: module.SettingsTrashView })),
+);
 
 const NAV_ITEMS: Array<{ id: NavTab; label: string; shortLabel: string; icon: typeof LayoutDashboard }> = [
   { id: 'dashboard', label: 'Inicio', shortLabel: 'Inicio', icon: LayoutDashboard },
@@ -92,6 +118,26 @@ class SilvvErrorBoundary extends Component<
     }
     return this.props.children;
   }
+}
+
+function ViewLoadingState({ isFullBleed }: { isFullBleed: boolean }) {
+  return (
+    <div
+      role="status"
+      aria-label="Cargando sección"
+      className={`w-full ${isFullBleed ? 'h-full p-4' : 'space-y-5'}`}
+    >
+      <span className="sr-only">Cargando sección...</span>
+      <div aria-hidden="true" className="space-y-4 animate-pulse">
+        <div className="h-8 w-2/5 rounded-xl bg-zinc-200/70 dark:bg-white/10" />
+        <div className="h-28 rounded-2xl glass-panel" />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="h-36 rounded-2xl glass-panel" />
+          <div className="h-36 rounded-2xl glass-panel" />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function App() {
@@ -270,11 +316,7 @@ export default function App() {
   }
 
   if (!firebaseUser) {
-    return (
-      <MotionConfig reducedMotion="user">
-        <AuthScreen />
-      </MotionConfig>
-    );
+    return <AuthScreen />;
   }
 
   const displayName =
@@ -290,8 +332,7 @@ export default function App() {
   const isFullBleedChat = activeTab === 'chat' || activeTab === 'knowledge';
 
   return (
-    <MotionConfig reducedMotion="user">
-      <SilvvErrorBoundary>
+    <SilvvErrorBoundary>
         <div
           className={`${isFullBleedChat ? (mobileKeyboardOpen ? 'h-[var(--silvv-visual-viewport-height,100dvh)] min-h-0 overflow-hidden' : 'h-[100dvh] min-h-0 overflow-hidden') : 'min-h-screen'} bg-zinc-50 dark:bg-[#09090B] silvv-ambient-bg text-zinc-900 dark:text-zinc-100 flex`}
         >
@@ -501,6 +542,7 @@ export default function App() {
                   : 'flex-1 max-w-6xl w-full mx-auto px-4 sm:px-8 py-6 pb-24 lg:pb-8'
               }
             >
+              <Suspense fallback={<ViewLoadingState isFullBleed={isFullBleedChat} />}>
               {activeTab === 'dashboard' && (
                 <DashboardView
                   data={dashboardData}
@@ -577,6 +619,7 @@ export default function App() {
                   onDataChanged={loadWorkspace}
                 />
               )}
+              </Suspense>
             </main>
           </div>
 
@@ -615,7 +658,6 @@ export default function App() {
             onNavigate={(tab) => setActiveTab(tab)}
           />
         </div>
-      </SilvvErrorBoundary>
-    </MotionConfig>
+    </SilvvErrorBoundary>
   );
 }
