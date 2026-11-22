@@ -23,8 +23,6 @@ export function PrivateImagePreview({
   onOpenChange,
 }: PrivateImagePreviewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const dialogRef = useRef<HTMLDialogElement>(null);
-  const previousOverflowRef = useRef<string | undefined>(undefined);
   const [shouldLoad, setShouldLoad] = useState(!lazy || Boolean(src));
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -80,23 +78,21 @@ export function PrivateImagePreview({
   }, [fileId, shouldLoad, src]);
 
   useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
+    if (!isOpen) return;
 
-    if (isOpen && !dialog.open) {
-      previousOverflowRef.current = document.body.style.overflow;
-      document.body.style.overflow = 'hidden';
-      dialog.showModal();
-    } else if (!isOpen && dialog.open) {
-      dialog.close();
-    }
-
-    return () => {
-      if (dialog.open) dialog.close();
-      if (previousOverflowRef.current !== undefined) {
-        document.body.style.overflow = previousOverflowRef.current;
-        previousOverflowRef.current = undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setOpen(false);
       }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
     };
   }, [isOpen]);
 
@@ -134,30 +130,28 @@ export function PrivateImagePreview({
           />
         )}
       </div>
-      {resolvedUrl &&
+      {resolvedUrl && isOpen &&
         createPortal(
-          <dialog
-            ref={dialogRef}
+          <div
+            role="dialog"
+            aria-modal="true"
             aria-label={alt}
-            onClose={() => setOpen(false)}
-            onCancel={(event) => {
-              event.preventDefault();
-              setOpen(false);
-            }}
+            tabIndex={-1}
             onClick={(event) => {
               if (event.target === event.currentTarget) setOpen(false);
             }}
-            className="fixed inset-0 m-auto flex max-h-[100dvh] max-w-[100vw] items-center justify-center border-0 bg-transparent p-4 text-white backdrop:bg-black/90"
+            className="fixed inset-0 z-[120] flex items-center justify-center bg-black/90 p-4 text-white"
           >
-            <div className="relative flex max-h-full max-w-full flex-col items-center gap-3">
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                aria-label="Cerrar imagen"
-                className="absolute -right-2 -top-2 z-10 flex size-10 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
-              >
-                <X className="size-5" />
-              </button>
+            <button
+              type="button"
+              autoFocus
+              onClick={() => setOpen(false)}
+              aria-label="Cerrar imagen"
+              className="absolute right-4 top-4 z-10 flex size-11 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+            >
+              <X className="size-5" />
+            </button>
+            <div className="flex max-h-full max-w-full flex-col items-center gap-3">
               <img
                 src={resolvedUrl}
                 alt={alt}
@@ -165,7 +159,7 @@ export function PrivateImagePreview({
               />
               <p className="max-w-full truncate text-xs text-white/75">{alt}</p>
             </div>
-          </dialog>,
+          </div>,
           document.body,
         )}
     </>
