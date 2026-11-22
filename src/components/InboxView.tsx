@@ -36,6 +36,7 @@ interface InboxViewProps {
   initialConversationId?: number | null;
   onClearQuickText: () => void;
   onDataChanged: () => void;
+  mobileKeyboardOpen: boolean;
 }
 
 interface PendingAttachment {
@@ -61,6 +62,7 @@ export function InboxView({
   initialConversationId,
   onClearQuickText,
   onDataChanged,
+  mobileKeyboardOpen,
 }: InboxViewProps) {
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [showArchived, setShowArchived] = useState(false);
@@ -1019,7 +1021,7 @@ export function InboxView({
         {/* Sticky Docked Composer */}
         <form
           onSubmit={handleSend}
-          className="px-4 sm:px-8 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-zinc-200/70 dark:border-white/10 glass-panel shrink-0"
+          className={`px-4 sm:px-8 pt-3 ${mobileKeyboardOpen ? 'pb-3' : 'pb-[max(0.75rem,env(safe-area-inset-bottom))]'} border-t border-zinc-200/70 dark:border-white/10 glass-panel shrink-0`}
         >
           <div className="max-w-4xl mx-auto space-y-2.5">
             {(attachments.length > 0 || showLinkInput) && (
@@ -1110,6 +1112,7 @@ export function InboxView({
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
+                    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
                     e.preventDefault();
                     handleSend(e);
                   }

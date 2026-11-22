@@ -16,6 +16,7 @@ import {
   PinOff,
   Plus,
   Search,
+  Sparkles,
   StickyNote,
   Trash2,
   X,
@@ -27,6 +28,7 @@ import {
   type NoteAttachment,
   type NoteFolderItem,
   type NoteItem,
+  type NoteOrganization,
 } from '../lib/api';
 import { MarkdownRenderer } from './MarkdownRenderer';
 
@@ -36,6 +38,129 @@ interface NotesViewProps {
 }
 
 type NoteFilterMode = 'all' | 'pinned' | 'quick' | 'archived';
+type SmartNoteCategory = 'Estudios' | 'Vida diaria';
+
+const SMART_NOTE_ROOTS: SmartNoteCategory[] = ['Estudios', 'Vida diaria'];
+
+function normalizeFolderName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ');
+}
+
+function isSmartRootFolder(folder: NoteFolderItem): boolean {
+  return (
+    folder.parentId == null &&
+    SMART_NOTE_ROOTS.some((category) => normalizeFolderName(category) === normalizeFolderName(folder.name))
+  );
+}
+
+function getFolderPathLabel(folders: NoteFolderItem[], folderId: number | null): string {
+  if (folderId === null) return '';
+  const folder = folders.find((item) => item.id === folderId);
+  if (!folder) return '';
+  const parent = folder.parentId === null ? undefined : folders.find((item) => item.id === folder.parentId);
+  return parent ? `${parent.name} / ${folder.name}` : folder.name;
+}
+
+async function ensureSmartRootFolders(folders: NoteFolderItem[]): Promise<NoteFolderItem[]> {
+  let next = [...folders];
+  for (const category of SMART_NOTE_ROOTS) {
+    const exists = next.some(
+      (folder) => folder.parentId == null && normalizeFolderName(folder.name) === normalizeFolderName(category),
+    );
+    if (exists) continue;
+    const created = await apiRequest<NoteFolderItem>('/api/note-folders', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: category,
+        parentId: null,
+        color: category === 'Estudios' ? '#8B5CF6' : '#3B82F6',
+      }),
+    });
+    next = [...next, created];
+  }
+  return next.sort((a, b) => {
+    const aRootIndex = SMART_NOTE_ROOTS.findIndex(
+      (category) => isSmartRootFolder(a) && normalizeFolderName(category) === normalizeFolderName(a.name),
+    );
+    const bRootIndex = SMART_NOTE_ROOTS.findIndex(
+      (category) => isSmartRootFolder(b) && normalizeFolderName(category) === normalizeFolderName(b.name),
+    );
+    if (aRootIndex >= 0 || bRootIndex >= 0) {
+      if (aRootIndex < 0) return 1;
+      if (bRootIndex < 0) return -1;
+      return aRootIndex - bRootIndex;
+    }
+    return a.name.localeCompare(b.name);
+  });
+}
+
+function getSmartCategoryForFolder(
+  folders: NoteFolderItem[],
+  folderId: number,
+): SmartNoteCategory | null {
+  let current = folders.find((folder) => folder.id === folderId);
+  while (current) {
+    if (current.parentId == null) {
+      const rootName = current.name;
+      return SMART_NOTE_ROOTS.find(
+        (category) => normalizeFolderName(category) === normalizeFolderName(rootName),
+      ) || null;
+    }
+    const parentId = current.parentId;
+    current = folders.find((folder) => folder.id === parentId);
+  }
+  return null;
+}
+
+async function ensureSmartFolderPath(
+  folders: NoteFolderItem[],
+  category: SmartNoteCategory,
+  requestedSubfolder: string,
+): Promise<{ folders: NoteFolderItem[]; folderId: number }> {
+  let next = [...folders];
+  let root = next.find(
+    (folder) => folder.parentId == null && normalizeFolderName(folder.name) === normalizeFolderName(category),
+  );
+  if (!root) {
+    root = await apiRequest<NoteFolderItem>('/api/note-folders', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: category,
+        parentId: null,
+        color: category === 'Estudios' ? '#8B5CF6' : '#3B82F6',
+      }),
+    });
+    next = [...next, root];
+  }
+
+  const subfolderName = requestedSubfolder.split(/[\\/]/).pop()?.trim().replace(/\s+/g, ' ').slice(0, 48) || '';
+  if (!subfolderName || normalizeFolderName(subfolderName) === normalizeFolderName(category)) {
+    return { folders: next, folderId: root.id };
+  }
+
+  let subfolder = next.find(
+    (folder) =>
+      folder.parentId === root.id && normalizeFolderName(folder.name) === normalizeFolderName(subfolderName),
+  );
+  if (!subfolder) {
+    subfolder = await apiRequest<NoteFolderItem>('/api/note-folders', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: subfolderName,
+        parentId: root.id,
+        color: category === 'Estudios' ? '#8B5CF6' : '#3B82F6',
+      }),
+    });
+    next = [...next, subfolder];
+  }
+
+  return { folders: next, folderId: subfolder.id };
+}
 
 function AttachmentThumb({
   attachment,
@@ -139,6 +264,8 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
   const [searching, setSearching] = useState(false);
 
   const [selectedNoteId, setSelectedNoteId] = useState<number | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [organizingNote, setOrganizingNote] = useState(false);
   const [draftTitle, setDraftTitle] = useState('');
   const [draftContent, setDraftContent] = useState('');
   const [draftTagsText, setDraftTagsText] = useState('');
@@ -160,6 +287,8 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hydratingRef = useRef(false);
+  const foldersRef = useRef<NoteFolderItem[]>([]);
+  const smartRootFoldersPromiseRef = useRef<Promise<NoteFolderItem[]> | null>(null);
 
   const loadAll = async (q = searchQuery) => {
     if (!q.trim()) setLoading(true);
@@ -171,8 +300,24 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
         apiRequest<NoteItem[]>(notesUrl),
         apiRequest<NoteFolderItem[]>('/api/note-folders'),
       ]);
+      let rootFoldersPromise = smartRootFoldersPromiseRef.current;
+      if (!rootFoldersPromise) {
+        rootFoldersPromise = ensureSmartRootFolders(folderList);
+        smartRootFoldersPromiseRef.current = rootFoldersPromise;
+      }
+      let initializedFolders = folderList;
+      try {
+        initializedFolders = await rootFoldersPromise;
+      } catch {
+        setError('No se pudieron preparar las carpetas inteligentes. Podés seguir usando tus notas.');
+      } finally {
+        if (smartRootFoldersPromiseRef.current === rootFoldersPromise) {
+          smartRootFoldersPromiseRef.current = null;
+        }
+      }
+      foldersRef.current = initializedFolders;
       setNotes(noteList);
-      setFolders(folderList);
+      setFolders(initializedFolders);
       setSelectedNoteId((prev) => {
         if (prev && noteList.some((n) => n.id === prev)) return prev;
         return noteList[0]?.id ?? null;
@@ -188,6 +333,10 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
   useEffect(() => {
     loadAll('');
   }, []);
+
+  useEffect(() => {
+    foldersRef.current = folders;
+  }, [folders]);
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -279,28 +428,137 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
     };
   }, [draftTitle, draftContent, draftTagsText, draftFolderId]);
 
+  useEffect(() => {
+    if (!editorOpen || !activeNote || !draftContent.trim()) return;
+    const content = draftContent.trim();
+    const waitingForInitialTitle = activeNote.title === 'Generando título…';
+    const alreadyOrganized =
+      activeNote.folderId !== null &&
+      getSmartCategoryForFolder(foldersRef.current, activeNote.folderId) !== null &&
+      !waitingForInitialTitle;
+    if (content === activeNote.content.trim() && alreadyOrganized) return;
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setOrganizingNote(true);
+      try {
+        const organization = await apiRequest<NoteOrganization>('/api/ai/note-organization', {
+          method: 'POST',
+          body: JSON.stringify({ content }),
+        });
+        if (cancelled) return;
+
+        const folderPath = await ensureSmartFolderPath(
+          foldersRef.current,
+          organization.category,
+          organization.subfolderName,
+        );
+        if (cancelled) return;
+
+        foldersRef.current = folderPath.folders;
+        setFolders(folderPath.folders);
+        setDraftTitle(organization.title);
+        setDraftFolderId(folderPath.folderId);
+      } catch (err) {
+        if (!cancelled) {
+          if (draftTitle === 'Generando título…') setDraftTitle('Nota nueva');
+          setError(err instanceof Error ? err.message : 'No se pudo organizar la nota automáticamente.');
+        }
+      } finally {
+        if (!cancelled) setOrganizingNote(false);
+      }
+    }, 1000);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      setOrganizingNote(false);
+    };
+  }, [activeNote?.id, activeNote?.title, draftContent, editorOpen]);
+
+  const handleCloseEditor = async () => {
+    if (!activeNote) {
+      setEditorOpen(false);
+      return;
+    }
+
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+
+    const parsedTags = draftTagsText.split(',').map((tag) => tag.trim()).filter(Boolean);
+    const titleToSave = draftContent.trim() ? draftTitle.trim() || 'Nota nueva' : 'Nueva nota';
+    const originalTags = activeNote.tags || [];
+    const changed =
+      titleToSave !== activeNote.title ||
+      draftContent !== activeNote.content ||
+      draftFolderId !== (activeNote.folderId ?? null) ||
+      parsedTags.length !== originalTags.length ||
+      parsedTags.some((tag, index) => tag !== originalTags[index]);
+
+    if (changed) {
+      setSaveState('saving');
+      try {
+        const updated = await apiRequest<NoteItem>(`/api/notes/${activeNote.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            title: titleToSave,
+            content: draftContent,
+            folderId: draftFolderId,
+            tags: parsedTags,
+            recomputeEmbedding: true,
+          }),
+        });
+        setNotes((previous) => previous.map((note) => (note.id === updated.id ? updated : note)));
+        setDraftTitle(titleToSave);
+        setSaveState('saved');
+        onDataChanged();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'No se pudieron guardar los últimos cambios.');
+        setSaveState('idle');
+        return;
+      }
+    }
+
+    setEditorOpen(false);
+  };
+
   const handleCreateNote = async (isQuick = false, customText?: string) => {
     if (creatingNote) return;
     setCreatingNote(true);
     setError(null);
     try {
       const content = isQuick ? (customText || '').trim() : '';
-      const firstLine = content.split('\n')[0]?.trim() || '';
-      const title = isQuick
-        ? (firstLine.slice(0, 80) || 'Nota rápida')
-        : `Nueva nota (${new Date().toLocaleDateString('es-UY')})`;
+      const selectedFolder =
+        typeof selectedFolderId === 'number'
+          ? foldersRef.current.find((folder) => folder.id === selectedFolderId)
+          : undefined;
+      const selectedCategory =
+        typeof selectedFolderId === 'number'
+          ? getSmartCategoryForFolder(foldersRef.current, selectedFolderId)
+          : null;
+      const category = selectedCategory || 'Vida diaria';
+      const defaultPath = await ensureSmartFolderPath(foldersRef.current, category, '');
+      const folderId = selectedCategory && selectedFolder ? selectedFolder.id : defaultPath.folderId;
+      foldersRef.current = defaultPath.folders;
+      setFolders(defaultPath.folders);
+
+      const title = 'Generando título…';
       const created = await apiRequest<NoteItem>('/api/notes', {
         method: 'POST',
         body: JSON.stringify({
           title,
           content,
-          folderId: selectedFolderId === 'all' ? null : selectedFolderId,
+          folderId,
           tags: selectedTag ? [selectedTag] : [],
           isQuick,
         }),
       });
       setNotes((prev) => [created, ...prev]);
       setSelectedNoteId(created.id);
+      setEditorOpen(true);
+      setPreviewMode(false);
       if (filterMode === 'archived') setFilterMode('all');
       if (isQuick) {
         setQuickText('');
@@ -334,6 +592,7 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
         body: JSON.stringify({ isArchived: !note.isArchived }),
       });
       setNotes((prev) => prev.map((n) => (n.id === note.id ? updated : n)));
+      if (selectedNoteId === note.id && !note.isArchived) setEditorOpen(false);
       onDataChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo archivar la nota.');
@@ -347,6 +606,7 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
       setNotes(remaining);
       if (selectedNoteId === id) {
         setSelectedNoteId(remaining[0]?.id ?? null);
+        setEditorOpen(false);
       }
       onDataChanged();
     } catch (err) {
@@ -434,12 +694,22 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
   const handleCreateFolder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newFolderName.trim()) return;
+    const parentId = newFolderParentId === '' ? null : Number(newFolderParentId);
+    const reservedRoot =
+      parentId === null &&
+      SMART_NOTE_ROOTS.some(
+        (category) => normalizeFolderName(category) === normalizeFolderName(newFolderName),
+      );
+    if (reservedRoot) {
+      setError('Estudios y Vida diaria son categorías principales y no se pueden duplicar.');
+      return;
+    }
     try {
       const created = await apiRequest<NoteFolderItem>('/api/note-folders', {
         method: 'POST',
         body: JSON.stringify({
           name: newFolderName.trim(),
-          parentId: newFolderParentId === '' ? null : Number(newFolderParentId),
+          parentId,
         }),
       });
       setFolders((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
@@ -454,6 +724,12 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
 
   const handleRenameFolder = async (folderId: number) => {
     const trimmed = renameFolderVal.trim();
+    const folder = folders.find((item) => item.id === folderId);
+    if (folder && isSmartRootFolder(folder)) {
+      setError('Las categorías principales Estudios y Vida diaria no se pueden renombrar.');
+      setRenamingFolderId(null);
+      return;
+    }
     if (!trimmed) {
       setRenamingFolderId(null);
       return;
@@ -471,6 +747,11 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
   };
 
   const handleDeleteFolder = async (folderId: number) => {
+    const folder = folders.find((item) => item.id === folderId);
+    if (folder && isSmartRootFolder(folder)) {
+      setError('Las categorías principales Estudios y Vida diaria no se pueden eliminar.');
+      return;
+    }
     try {
       await apiRequest(`/api/note-folders/${folderId}`, { method: 'DELETE' });
       setFolders((prev) => prev.filter((f) => f.id !== folderId));
@@ -531,8 +812,12 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
   const renderFolderTree = (parentId: number | null = null, depth = 0) => {
     const branch = folders.filter((f) => (f.parentId ?? null) === parentId);
     return branch.map((fld) => {
-      const count = notes.filter((n) => !n.isArchived && n.folderId === fld.id).length;
+      const branchIds = getFolderBranchIds(fld.id);
+      const count = notes.filter(
+        (note) => !note.isArchived && note.folderId !== null && branchIds.includes(note.folderId),
+      ).length;
       const active = selectedFolderId === fld.id;
+      const isSmartRoot = isSmartRootFolder(fld);
       const isRenaming = renamingFolderId === fld.id;
       return (
         <div key={fld.id}>
@@ -576,7 +861,8 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
                   <span className="truncate">{fld.name}</span>
                 </button>
                 <div className="flex items-center gap-1 shrink-0">
-                  <div className="hidden group-hover:flex items-center gap-0.5">
+                  {!isSmartRoot && (
+                    <div className="hidden group-hover:flex items-center gap-0.5">
                     <button
                       type="button"
                       onClick={() => {
@@ -596,7 +882,8 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
                     >
                       <Trash2 className="w-3 h-3" />
                     </button>
-                  </div>
+                    </div>
+                  )}
                   <span className="tabular-nums text-zinc-400">{count}</span>
                 </div>
               </>
@@ -609,39 +896,57 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
   };
 
   return (
-    <div className="space-y-5 animate-silvv-in">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="font-display text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
-            Notas
-          </h1>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            Tus apuntes e ideas con autoguardado, carpetas, etiquetas, adjuntos y conexión directa con ambos chats.
-          </p>
-        </div>
+    <div
+      className={
+        editorOpen
+          ? 'fixed inset-0 z-[70] h-[var(--silvv-visual-viewport-height,100dvh)] w-full overflow-hidden bg-zinc-50 dark:bg-[#09090B] silvv-ambient-bg'
+          : 'space-y-5 animate-silvv-in'
+      }
+    >
+      {!editorOpen && (
+        <>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h1 className="font-display text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+                Notas
+              </h1>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                Tus apuntes e ideas con autoguardado, carpetas, etiquetas, adjuntos y conexión directa con ambos chats.
+              </p>
+            </div>
 
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setQuickOpen((value) => !value)}
+              aria-pressed={quickOpen}
+              className="inline-flex items-center gap-1.5 self-start sm:self-auto px-3.5 py-2 rounded-xl glass-panel text-xs font-medium text-zinc-800 dark:text-zinc-200 hover:border-violet-500/40 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            >
+              <Zap className="w-3.5 h-3.5 text-amber-500" />
+              <span>Nota rápida</span>
+            </button>
+          </div>
+
           <button
             type="button"
-            onClick={() => setQuickOpen((v) => !v)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl glass-panel text-xs font-medium text-zinc-800 dark:text-zinc-200 hover:border-violet-500/40 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            disabled={creatingNote || loading}
+            onClick={() => void handleCreateNote(false)}
+            aria-label="Crear una nueva nota"
+            className="group relative flex w-full items-center gap-4 overflow-hidden rounded-2xl border border-violet-400/30 bg-gradient-to-r from-violet-600 via-violet-600 to-indigo-600 px-5 py-5 text-left text-white shadow-[0_14px_38px_-18px_rgba(124,58,237,0.75)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_18px_44px_-18px_rgba(124,58,237,0.85)] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-50 disabled:cursor-wait disabled:opacity-70 dark:focus-visible:ring-offset-[#09090B]"
           >
-            <Zap className="w-3.5 h-3.5 text-amber-500" />
-            <span>Nota rápida</span>
+            <span className="absolute -right-8 -top-10 h-32 w-32 rounded-full bg-white/10 blur-2xl transition-transform duration-300 group-hover:scale-125" aria-hidden="true" />
+            <span className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/15 ring-1 ring-white/25 shadow-inner">
+              <Plus className="h-6 w-6 transition-transform duration-200 group-hover:rotate-90" aria-hidden="true" />
+            </span>
+            <span className="relative min-w-0 flex-1">
+              <span className="block font-display text-lg font-semibold tracking-tight">Nueva nota</span>
+              <span className="mt-0.5 block text-sm text-violet-100">Escribí libremente. La IA crea el título y la organiza por vos.</span>
+            </span>
+            <span className="relative hidden text-sm font-medium text-violet-100 sm:block">Crear</span>
           </button>
-          <button
-            type="button"
-            disabled={creatingNote}
-            onClick={() => handleCreateNote(false)}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Nueva nota</span>
-          </button>
-        </div>
-      </div>
+        </>
+      )}
 
-      {quickOpen && (
+      {!editorOpen && quickOpen && (
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -667,7 +972,7 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
             </button>
             <button
               type="submit"
-              disabled={!quickText.trim() || creatingNote}
+              disabled={!quickText.trim() || creatingNote || loading}
               className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white text-xs font-medium cursor-pointer whitespace-nowrap"
             >
               Guardar rápida
@@ -685,9 +990,9 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* Sidebar: Folders, Filters, Tags */}
-        <aside className="lg:col-span-3 glass-panel rounded-2xl p-4 space-y-5 self-start">
+      <div className={editorOpen ? 'h-full min-h-0' : 'grid grid-cols-1 lg:grid-cols-12 gap-5'}>
+        {!editorOpen && (
+          <aside className="order-2 lg:order-1 lg:col-span-3 glass-panel rounded-2xl p-4 space-y-5 self-start">
           <div className="space-y-1">
             <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 px-2 pb-1">
               Vistas
@@ -810,12 +1115,13 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
               </div>
             </div>
           )}
-        </aside>
+          </aside>
+        )}
 
         {/* Notes List + Editor Split */}
-        <div className="lg:col-span-9 grid grid-cols-1 xl:grid-cols-12 gap-5">
-          {/* Search & List */}
-          <div className="xl:col-span-5 glass-panel rounded-2xl flex flex-col overflow-hidden max-h-[760px]">
+        <div className={editorOpen ? 'h-full min-h-0' : 'order-1 lg:order-2 lg:col-span-9 grid grid-cols-1 xl:grid-cols-12 gap-5'}>
+          {!editorOpen && (
+            <div className="xl:col-span-5 glass-panel rounded-2xl flex flex-col overflow-hidden max-h-[760px]">
             <div className="p-3.5 border-b border-zinc-200/70 dark:border-white/10 space-y-2">
               <div className="relative">
                 <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -863,12 +1169,16 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
               ) : (
                 visibleNotes.map((n) => {
                   const active = n.id === selectedNoteId;
-                  const folderName = folders.find((f) => f.id === n.folderId)?.name;
+                  const folderName = getFolderPathLabel(folders, n.folderId);
                   return (
                     <button
                       key={n.id}
                       type="button"
-                      onClick={() => setSelectedNoteId(n.id)}
+                      onClick={() => {
+                        setSelectedNoteId(n.id);
+                        setEditorOpen(true);
+                        setPreviewMode(false);
+                      }}
                       className={`w-full text-left px-4 py-3.5 transition-colors cursor-pointer space-y-1 ${
                         active
                           ? 'bg-violet-600/10 dark:bg-violet-500/15'
@@ -898,35 +1208,74 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
                 })
               )}
             </div>
-          </div>
+            </div>
+          )}
 
           {/* Note Editor / Detail */}
-          <div className="xl:col-span-7 glass-panel rounded-2xl p-5 flex flex-col gap-4 min-h-[560px]">
-            {!activeNote ? (
+          <div
+            className={
+              editorOpen
+                ? 'h-full min-h-0 w-full glass-panel rounded-none border-0 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] sm:px-8 flex flex-col gap-4 overflow-y-auto animate-silvv-editor-in'
+                : 'xl:col-span-7 glass-panel rounded-2xl p-5 flex flex-col gap-4 min-h-[560px]'
+            }
+          >
+            {!editorOpen ? (
+              <div className="hidden xl:flex flex-col m-auto text-center max-w-sm space-y-3 py-12">
+                <p className="font-display text-base font-medium text-zinc-900 dark:text-zinc-100">
+                  Tu historial, siempre a mano
+                </p>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                  Elegí una nota para editarla en pantalla completa. Cada cambio se guarda automáticamente.
+                </p>
+              </div>
+            ) : !activeNote ? (
               <div className="m-auto text-center max-w-sm space-y-3 py-12">
                 <p className="font-display text-base font-medium text-zinc-900 dark:text-zinc-100">
                   Seleccioná o creá una nota
-                </p>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
-                  Todo cambio se guarda automáticamente. Podés adjuntar imágenes o documentos y consultar tus notas desde cualquier chat de SILVV MEMORY.
                 </p>
               </div>
             ) : (
               <>
                 <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-zinc-200/70 dark:border-white/10">
-                  <div className="flex items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400 tabular-nums">
-                    <span>
-                      {saveState === 'saving'
-                        ? 'Guardando cambios...'
-                        : saveState === 'saved'
-                          ? 'Guardado automáticamente'
-                          : 'Sincronizado'}
-                    </span>
-                    <span aria-hidden="true">·</span>
-                    <span>Creada {formatDate(activeNote.createdAt)}</span>
-                    <span aria-hidden="true">·</span>
-                    <span>Modificada {formatDate(activeNote.updatedAt)}</span>
+                  <div className="flex flex-1 items-center gap-3 min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => void handleCloseEditor()}
+                    aria-label="Volver al historial de notas"
+                    title="Volver al historial"
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl glass-subtle text-zinc-600 dark:text-zinc-300 transition-colors hover:text-zinc-950 dark:hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+                  >
+                    <X className="h-5 w-5" aria-hidden="true" />
+                  </button>
+                  <div className="min-w-0">
+                    <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[11px] font-medium text-violet-600 dark:text-violet-300">
+                      <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                      <span>
+                        {organizingNote
+                          ? 'La IA está organizando tu nota'
+                          : !draftContent.trim()
+                            ? 'Escribí para empezar'
+                            : 'Título sugerido por IA'}
+                      </span>
+                      <span className="text-zinc-400 dark:text-zinc-500" aria-hidden="true">·</span>
+                      <span className="text-zinc-500 dark:text-zinc-400">
+                        {saveState === 'saving'
+                          ? 'Guardando…'
+                          : saveState === 'saved'
+                            ? 'Guardado automáticamente'
+                            : 'Sincronizado'}
+                      </span>
+                    </div>
+                    <h1 className="truncate font-display text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-50 sm:text-xl">
+                      {draftTitle === 'Generando título…' && !draftContent.trim()
+                        ? 'Tu nueva nota'
+                        : draftTitle || 'Nota nueva'}
+                    </h1>
+                    <p className="mt-0.5 text-[11px] text-zinc-500 dark:text-zinc-400 tabular-nums">
+                      Creada {formatDate(activeNote.createdAt)} · Actualizada {formatDate(activeNote.updatedAt)}
+                    </p>
                   </div>
+                </div>
 
                   <div className="flex items-center gap-1.5 shrink-0">
                     <button
@@ -984,14 +1333,6 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
                   </div>
                 </div>
 
-                <input
-                  type="text"
-                  value={draftTitle}
-                  onChange={(e) => setDraftTitle(e.target.value)}
-                  placeholder="Título de la nota..."
-                  className="font-display text-xl font-semibold bg-transparent text-zinc-900 dark:text-zinc-50 focus:outline-none"
-                />
-
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-[11px] text-zinc-500 dark:text-zinc-400 mb-1">
@@ -1004,10 +1345,10 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
                       }
                       className="w-full px-3 py-1.5 rounded-xl border border-zinc-200/80 dark:border-white/10 bg-white/70 dark:bg-black/30 text-xs text-zinc-900 dark:text-zinc-100"
                     >
-                      <option value="">Sin carpeta</option>
-                      {folders.map((f) => (
-                        <option key={f.id} value={f.id}>
-                          {f.name}
+                      <option value="">Sin carpeta (por clasificar)</option>
+                      {folders.map((folder) => (
+                        <option key={folder.id} value={folder.id}>
+                          {getFolderPathLabel(folders, folder.id)}
                         </option>
                       ))}
                     </select>
@@ -1027,15 +1368,16 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
                 </div>
 
                 {previewMode ? (
-                  <div className="flex-1 min-h-[260px] p-4 rounded-xl glass-subtle overflow-y-auto">
+                  <div className={`flex-1 ${editorOpen ? 'min-h-[140px]' : 'min-h-[260px]'} p-4 rounded-xl glass-subtle overflow-y-auto`}>
                     <MarkdownRenderer content={draftContent || '*Nota vacía.*'} />
                   </div>
                 ) : (
                   <textarea
+                    aria-label="Contenido de la nota"
                     value={draftContent}
                     onChange={(e) => setDraftContent(e.target.value)}
                     placeholder="Escribí libremente tus ideas, apuntes, borradores o listas (admite Markdown)..."
-                    className="flex-1 min-h-[260px] w-full resize-none p-4 rounded-xl border border-zinc-200/80 dark:border-white/10 bg-white/60 dark:bg-black/25 text-sm text-zinc-900 dark:text-zinc-100 leading-relaxed focus:outline-none focus:ring-2 focus:ring-violet-500/35"
+                    className={`flex-1 ${editorOpen ? 'min-h-[140px]' : 'min-h-[260px]'} w-full resize-none p-4 rounded-xl border border-zinc-200/80 dark:border-white/10 bg-white/60 dark:bg-black/25 text-sm text-zinc-900 dark:text-zinc-100 leading-relaxed focus:outline-none focus:ring-2 focus:ring-violet-500/35`}
                   />
                 )}
 

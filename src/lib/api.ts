@@ -194,6 +194,12 @@ export interface NoteItem {
   updatedAt: string;
 }
 
+export interface NoteOrganization {
+  title: string;
+  category: 'Estudios' | 'Vida diaria';
+  subfolderName: string;
+}
+
 export interface MemoryEventItem {
   id: number;
   title: string;

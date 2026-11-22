@@ -100,6 +100,36 @@
   animation: silvvFadeSlideUp 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+@keyframes silvvEditorOpen {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-silvv-editor-in {
+  animation: silvvEditorOpen 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes silvvPanelEnter {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-silvv-panel-in {
+  animation: silvvPanelEnter 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-silvv-in {
     animation: none;

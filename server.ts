@@ -11,6 +11,7 @@ import {
   analyzeUniversalInput,
   generateDashboardBriefing,
   generateEmbeddingVector,
+  generateNoteOrganization,
   generatePeriodSummary,
   queryKnowledgeBrain,
   runCustomAgentChat,
@@ -531,6 +532,20 @@ app.use(express.json({ limit: '45mb' }));
       res.json({ ok: true });
     } catch (err) {
       sendServerError(res, err, 'Error al confirmar resúmenes programados.');
+    }
+  });
+
+  app.post('/api/ai/note-organization', requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const rawContent = typeof req.body?.content === 'string' ? req.body.content : '';
+      const content = rawContent.trim();
+      if (!content) return res.status(400).json({ error: 'Escribí contenido para organizar la nota.' });
+      if (content.length > 65000) return res.status(413).json({ error: 'La nota supera el límite permitido.' });
+
+      const organization = await generateNoteOrganization(content);
+      res.json(organization);
+    } catch (err) {
+      sendServerError(res, err, 'No se pudo organizar la nota automáticamente.');
     }
   });
 
