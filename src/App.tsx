@@ -288,7 +288,7 @@ export default function App() {
     <MotionConfig reducedMotion="user">
       <SilvvErrorBoundary>
         <div
-          className={`${isFullBleedChat && mobileKeyboardOpen ? 'h-[var(--silvv-visual-viewport-height,100dvh)] min-h-0 overflow-hidden' : 'min-h-screen'} bg-zinc-50 dark:bg-[#09090B] silvv-ambient-bg text-zinc-900 dark:text-zinc-100 flex`}
+          className={`${isFullBleedChat ? (mobileKeyboardOpen ? 'h-[var(--silvv-visual-viewport-height,100dvh)] min-h-0 overflow-hidden' : 'h-[100dvh] min-h-0 overflow-hidden') : 'min-h-screen'} bg-zinc-50 dark:bg-[#09090B] silvv-ambient-bg text-zinc-900 dark:text-zinc-100 flex`}
         >
           {/* Desktop Sidebar */}
           <aside className="hidden lg:flex lg:w-64 lg:flex-col lg:fixed lg:inset-y-0 glass-panel border-r border-zinc-200/70 dark:border-white/10 px-4 py-5 justify-between">
@@ -435,7 +435,7 @@ export default function App() {
 
           {/* Main Content Area */}
           <div
-            className={`flex-1 lg:pl-64 flex flex-col min-w-0 ${isFullBleedChat && mobileKeyboardOpen ? 'h-full min-h-0' : 'min-h-screen'}`}
+            className={`flex-1 lg:pl-64 flex flex-col min-w-0 ${isFullBleedChat ? 'h-full min-h-0' : 'min-h-screen'}`}
           >
             <header className="h-[calc(3.5rem+env(safe-area-inset-top))] shrink-0 border-b border-zinc-200/70 dark:border-white/10 glass-panel sticky top-0 z-30 px-4 pt-[env(safe-area-inset-top)] sm:px-8 flex items-center justify-between gap-4">
               <div className="flex items-center gap-3 min-w-0">
