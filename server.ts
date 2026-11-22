@@ -26,6 +26,7 @@ const WRITABLE_ROOT = IS_VERCEL ? os.tmpdir() : process.cwd();
 const UPLOADS_ROOT = path.resolve(WRITABLE_ROOT, 'uploads');
 const SCHEDULER_STATE_PATH = path.resolve(WRITABLE_ROOT, '.silvv-scheduler-state.json');
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+const MAX_DIRECT_UPLOAD_BYTES = 4 * 1024 * 1024;
 
 interface ScheduledSourceItem {
   sourceType: string;
@@ -358,13 +359,12 @@ function normalizeMimeType(mimeType: string): string {
     : 'application/octet-stream';
 }
 
-async function savePrivateUpload(
+async function savePrivateUploadBuffer(
   uid: string,
   originalName: string,
-  base64Data: string,
+  buffer: Buffer,
   mimeType: string,
 ): Promise<{ storagePath: string; sizeBytes: number }> {
-  const buffer = Buffer.from(base64Data, 'base64');
   if (buffer.byteLength > MAX_UPLOAD_BYTES) {
     throw new Error('El archivo supera el límite de 20 MB.');
   }
@@ -402,6 +402,29 @@ async function savePrivateUpload(
     storagePath: path.join(safeUid, storedFileName),
     sizeBytes: buffer.byteLength,
   };
+}
+
+async function savePrivateUpload(
+  uid: string,
+  originalName: string,
+  base64Data: string,
+  mimeType: string,
+): Promise<{ storagePath: string; sizeBytes: number }> {
+  return savePrivateUploadBuffer(uid, originalName, Buffer.from(base64Data, 'base64'), mimeType);
+}
+
+async function readPrivateUploadBuffer(uid: string, storagePath: string): Promise<Buffer> {
+  if (isUserPrivateBlobPath(uid, storagePath)) {
+    const blob = await get(storagePath, { access: 'private' });
+    if (!blob?.stream) throw new Error('El archivo adjunto ya no está disponible.');
+    const chunks: Buffer[] = [];
+    for await (const chunk of Readable.from(blob.stream as AsyncIterable<Uint8Array>)) {
+      chunks.push(Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
+  }
+
+  return fs.readFile(resolveUserStoragePath(uid, storagePath));
 }
 
 function resolveUserStoragePath(uid: string, storagePath: string): string {
@@ -599,11 +622,21 @@ app.use(express.json({ limit: '45mb' }));
         return res.status(400).json({ error: 'La URL ingresada debe usar http/https público válido.' });
       }
 
-      const incomingAtts: Array<{ name: string; mimeType: string; base64Data: string }> = [];
+      const incomingAtts: Array<{
+        name: string;
+        mimeType: string;
+        base64Data?: string;
+        storagePath?: string;
+      }> = [];
       if (Array.isArray(rawAtts)) {
-        for (const a of rawAtts) {
-          if (a && typeof a.base64Data === 'string' && typeof a.mimeType === 'string' && typeof a.name === 'string') {
-            incomingAtts.push(a);
+        for (const attachment of rawAtts) {
+          if (
+            attachment &&
+            typeof attachment.name === 'string' &&
+            typeof attachment.mimeType === 'string' &&
+            (typeof attachment.base64Data === 'string' || typeof attachment.storagePath === 'string')
+          ) {
+            incomingAtts.push(attachment);
           }
         }
       }
@@ -622,18 +655,27 @@ app.use(express.json({ limit: '45mb' }));
       const geminiAttachments: Array<{ mimeType: string; originalName: string; base64Data: string }> = [];
 
       for (const att of incomingAtts) {
-        const stored = await savePrivateUpload(uid, att.name, att.base64Data, att.mimeType);
+        const buffer = att.storagePath
+          ? await readPrivateUploadBuffer(uid, att.storagePath)
+          : Buffer.from(att.base64Data || '', 'base64');
+        if (buffer.byteLength > MAX_UPLOAD_BYTES) {
+          throw new Error('El archivo supera el límite de 20 MB.');
+        }
+        const stored = att.storagePath
+          ? { storagePath: att.storagePath, sizeBytes: buffer.byteLength }
+          : await savePrivateUploadBuffer(uid, att.name, buffer, att.mimeType);
+        const mimeType = normalizeMimeType(att.mimeType);
         storedAttachments.push({
           name: att.name.slice(0, 200),
-          mimeType: (att.mimeType || 'application/octet-stream').slice(0, 120),
-          fileKind: detectFileKind(att.mimeType),
+          mimeType: mimeType.slice(0, 120),
+          fileKind: detectFileKind(mimeType),
           storagePath: stored.storagePath,
           sizeBytes: stored.sizeBytes,
         });
         geminiAttachments.push({
-          mimeType: att.mimeType || 'application/octet-stream',
+          mimeType,
           originalName: att.name,
-          base64Data: att.base64Data,
+          base64Data: buffer.toString('base64'),
         });
       }
 
@@ -810,6 +852,29 @@ app.use(express.json({ limit: '45mb' }));
   // =========================================================================
   // PRIVATE FILE VAULT (BINARY STORAGE OUTSIDE 1MB FIRESTORE DOCS)
   // =========================================================================
+
+  app.post(
+    '/api/files/upload',
+    requireAuth,
+    express.raw({ type: 'application/octet-stream', limit: '4mb' }),
+    async (req: AuthRequest, res) => {
+      try {
+        const name = typeof req.query.name === 'string' ? req.query.name.slice(0, 200) : '';
+        const mimeType = typeof req.query.mimeType === 'string' ? req.query.mimeType : 'application/octet-stream';
+        if (!name || !Buffer.isBuffer(req.body) || req.body.byteLength === 0) {
+          return res.status(400).json({ error: 'Archivo inválido.' });
+        }
+        if (req.body.byteLength > MAX_DIRECT_UPLOAD_BYTES) {
+          return res.status(413).json({ error: 'El archivo supera el límite de carga directa.' });
+        }
+
+        const stored = await savePrivateUploadBuffer(req.user!.uid, name, req.body, mimeType);
+        res.json(stored);
+      } catch (err) {
+        sendServerError(res, err, 'No se pudo subir el adjunto.');
+      }
+    },
+  );
 
   app.get('/api/files/download', requireAuth, async (req: AuthRequest, res) => {
     try {

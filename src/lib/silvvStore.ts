@@ -352,6 +352,12 @@ type StoredFile = FileItem & {
   embedding?: number[] | null;
   deletedAt?: string | null;
 };
+type RawChatAttachment = {
+  name: string;
+  mimeType: string;
+  base64Data?: string;
+  storagePath?: string;
+};
 
 type StoredMemory = MemoryItem & {
   entities?: string[];
@@ -788,7 +794,7 @@ async function processChatTurn(params: {
   userMsgId: number;
   userText: string;
   linkUrl?: string;
-  rawAttachments: Array<{ name: string; mimeType: string; base64Data: string }>;
+  rawAttachments: RawChatAttachment[];
 }) {
   const { uid, convId, projectId, userMsgId, userText, linkUrl, rawAttachments } = params;
   const nowIso = new Date().toISOString();
@@ -2900,7 +2906,15 @@ export async function dispatchSilvvRequest<T>(rawPath: string, options: RequestI
     const linkUrl = typeof body.linkUrl === 'string' && body.linkUrl.trim() ? body.linkUrl.trim() : undefined;
     const rawProjectId = typeof body.projectId === 'number' ? body.projectId : null;
     const incomingAtts = Array.isArray(body.attachments)
-      ? (body.attachments as Array<{ name: string; mimeType: string; base64Data: string }>)
+      ? body.attachments.filter((attachment): attachment is RawChatAttachment => {
+          if (!attachment || typeof attachment !== 'object') return false;
+          const candidate = attachment as Record<string, unknown>;
+          return (
+            typeof candidate.name === 'string' &&
+            typeof candidate.mimeType === 'string' &&
+            (typeof candidate.base64Data === 'string' || typeof candidate.storagePath === 'string')
+          );
+        })
       : [];
 
     if (!userText && incomingAtts.length === 0 && !linkUrl) {
