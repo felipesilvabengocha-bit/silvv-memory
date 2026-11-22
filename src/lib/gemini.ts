@@ -32,29 +32,66 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, timeoutMessage: s
   }
 }
 
-function formatGeminiError(err: unknown): string {
-  const raw = err instanceof Error ? err.message : String(err || '');
+export function formatGeminiError(err: unknown): string {
+  const error = err && typeof err === 'object' ? (err as { status?: unknown; statusCode?: unknown; message?: unknown }) : {};
+  const status = Number(error.status ?? error.statusCode);
+  const raw = err instanceof Error ? err.message : typeof error.message === 'string' ? error.message : String(err || '');
   const lower = raw.toLowerCase();
-  if (lower.includes('api_key_invalid') || lower.includes('permission_denied') || lower.includes('403')) {
-    return 'Error de permisos o clave inválida en la API de Gemini. Verificá tu clave en Settings > Secrets.';
+
+  if (lower.includes('gemini_api_key no está configurada') || lower.includes('gemini_api_key is not configured')) {
+    return 'Falta GEMINI_API_KEY en las variables de entorno del servidor de Vercel (500).';
   }
-  if (lower.includes('429') || lower.includes('resource_exhausted')) {
-    return 'Se alcanzó temporalmente el límite de solicitudes de Gemini (429). Esperá unos segundos o revisá tu cuota en Settings > Secrets.';
+  if ([401, 403].includes(status) || lower.includes('api_key_invalid') || lower.includes('permission_denied') || lower.includes('401') || lower.includes('403') || lower.includes('rechazó la gemini_api_key')) {
+    return 'Gemini rechazó la GEMINI_API_KEY (401/403). Verificá que sea válida y esté disponible en las variables de entorno de Vercel.';
   }
-  if (lower.includes('503') || lower.includes('unavailable') || lower.includes('high demand')) {
-    return 'Los servidores de Gemini están experimentando alta demanda temporalmente (503). Intentá nuevamente en unos segundos.';
+  if (status === 429 || lower.includes('429') || lower.includes('resource_exhausted')) {
+    return 'Gemini rechazó la solicitud por cuota o límite de uso (429). Revisá el uso y la cuota de Google AI Studio.';
   }
-  const jsonStart = raw.indexOf('{');
-  if (jsonStart !== -1) {
-    try {
-      const parsed = JSON.parse(raw.slice(jsonStart)) as { error?: { message?: string }; message?: string };
-      if (parsed.error?.message) return parsed.error.message;
-      if (parsed.message) return parsed.message;
-    } catch {
-      // fall through
-    }
+  if (status === 404 || lower.includes('404') || lower.includes('not_found')) {
+    return 'El modelo de Gemini solicitado no está disponible para esta clave o API (404).';
   }
-  return raw || 'Error al comunicarse con Gemini.';
+  if (
+    status >= 500 ||
+    lower.includes('503') ||
+    lower.includes('504') ||
+    lower.includes('unavailable') ||
+    lower.includes('high demand') ||
+    lower.includes('fetch failed') ||
+    lower.includes('econnreset') ||
+    lower.includes('enotfound') ||
+    lower.includes('timeout')
+  ) {
+    return 'No se pudo conectar con Gemini temporalmente (503). Reintentá en unos segundos.';
+  }
+  if (status === 400 || lower.includes('invalid_argument')) {
+    return 'Gemini rechazó la solicitud (400). Revisá el modelo y el formato del mensaje.';
+  }
+  return 'No se pudo completar la solicitud a Gemini. Revisá la configuración de la API y volvé a intentar.';
+}
+
+export function getGeminiHttpStatus(err: unknown): number {
+  const error = err && typeof err === 'object' ? (err as { status?: unknown; statusCode?: unknown; message?: unknown }) : {};
+  const status = Number(error.status ?? error.statusCode);
+  const raw = err instanceof Error ? err.message : typeof error.message === 'string' ? error.message : String(err || '');
+  const lower = raw.toLowerCase();
+
+  if ([401, 403].includes(status) || lower.includes('api_key_invalid') || lower.includes('permission_denied') || lower.includes('401') || lower.includes('403')) return 401;
+  if (lower.includes('gemini_api_key no está configurada') || lower.includes('gemini_api_key is not configured') || lower.includes('(500)')) return 500;
+  if (status === 429 || lower.includes('429') || lower.includes('resource_exhausted')) return 429;
+  if (status === 404 || lower.includes('404') || lower.includes('not_found')) return 502;
+  if (
+    status >= 500 ||
+    lower.includes('503') ||
+    lower.includes('504') ||
+    lower.includes('unavailable') ||
+    lower.includes('high demand') ||
+    lower.includes('fetch failed') ||
+    lower.includes('econnreset') ||
+    lower.includes('enotfound') ||
+    lower.includes('timeout')
+  ) return 503;
+  if (status === 400 || lower.includes('invalid_argument')) return 400;
+  return 502;
 }
 
 function isTransientGeminiError(err: unknown): boolean {
@@ -356,7 +393,7 @@ export async function generateEmbeddingVector(text: string): Promise<number[] | 
     const values = res.embeddings?.[0]?.values;
     return Array.isArray(values) && values.length > 0 ? values : null;
   } catch (err) {
-    console.warn('Embedding generation skipped:', err instanceof Error ? err.message : err);
+    console.warn('Embedding generation skipped:', formatGeminiError(err));
     return null;
   }
 }
