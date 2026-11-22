@@ -4,6 +4,9 @@ import fs from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { del, get, put } from '@vercel/blob';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { requireAuth, type AuthRequest } from './src/middleware/auth.ts';
 import {
@@ -336,24 +339,60 @@ function sanitizeUidForPath(uid: string): string {
   return safe;
 }
 
+function getUserPrivateBlobPrefix(uid: string): string {
+  return `silvv-private/${sanitizeUidForPath(uid)}/`;
+}
+
+function isUserPrivateBlobPath(uid: string, storagePath: string): boolean {
+  const segments = storagePath.split('/');
+  return (
+    storagePath.startsWith(getUserPrivateBlobPrefix(uid)) &&
+    !storagePath.includes('\\') &&
+    segments.every((segment) => segment && segment !== '.' && segment !== '..')
+  );
+}
+
+function normalizeMimeType(mimeType: string): string {
+  return /^[a-z\d!#$&^_.+-]+\/[a-z\d!#$&^_.+-]+$/i.test(mimeType)
+    ? mimeType
+    : 'application/octet-stream';
+}
+
 async function savePrivateUpload(
   uid: string,
   originalName: string,
   base64Data: string,
+  mimeType: string,
 ): Promise<{ storagePath: string; sizeBytes: number }> {
   const buffer = Buffer.from(base64Data, 'base64');
   if (buffer.byteLength > MAX_UPLOAD_BYTES) {
     throw new Error('El archivo supera el límite de 20 MB.');
   }
+
   const safeUid = sanitizeUidForPath(uid);
+  const ext = path.extname(originalName).replace(/[^a-zA-Z0-9.]/g, '').slice(0, 12);
+  const storedFileName = `${crypto.randomUUID()}${ext}`;
+  const blobPath = `${getUserPrivateBlobPrefix(uid)}${storedFileName}`;
+  const contentType = normalizeMimeType(mimeType);
+
+  if (process.env.BLOB_STORE_ID) {
+    const blob = await put(blobPath, buffer, {
+      access: 'private',
+      contentType,
+      addRandomSuffix: false,
+    });
+    return { storagePath: blob.pathname, sizeBytes: buffer.byteLength };
+  }
+
+  if (IS_VERCEL) {
+    throw new Error('El almacenamiento Blob privado no está configurado en este entorno.');
+  }
+
   const userDir = path.resolve(UPLOADS_ROOT, safeUid);
   if (!userDir.startsWith(UPLOADS_ROOT + path.sep)) {
     throw new Error('Ruta de almacenamiento inválida.');
   }
   await fs.mkdir(userDir, { recursive: true });
-
-  const ext = path.extname(originalName).replace(/[^a-zA-Z0-9.]/g, '').slice(0, 12);
-  const storedFileName = `${crypto.randomUUID()}${ext}`;
   const fullPath = path.resolve(userDir, storedFileName);
   if (!fullPath.startsWith(userDir + path.sep)) {
     throw new Error('Ruta de archivo fuera del directorio permitido.');
@@ -583,7 +622,7 @@ app.use(express.json({ limit: '45mb' }));
       const geminiAttachments: Array<{ mimeType: string; originalName: string; base64Data: string }> = [];
 
       for (const att of incomingAtts) {
-        const stored = await savePrivateUpload(uid, att.name, att.base64Data);
+        const stored = await savePrivateUpload(uid, att.name, att.base64Data, att.mimeType);
         storedAttachments.push({
           name: att.name.slice(0, 200),
           mimeType: (att.mimeType || 'application/octet-stream').slice(0, 120),
@@ -721,7 +760,7 @@ app.use(express.json({ limit: '45mb' }));
         return res.status(400).json({ error: 'Archivo inválido.' });
       }
 
-      const stored = await savePrivateUpload(uid, name, base64Data);
+      const stored = await savePrivateUpload(uid, name, base64Data, mimeType);
       const analyzed = await analyzeAgentDocument({ fileName: name, mimeType, base64Data });
       const embedding = await generateEmbeddingVector(
         `${name}\n${analyzed.aiSummary}\n${analyzed.extractedText}`,
@@ -780,10 +819,22 @@ app.use(express.json({ limit: '45mb' }));
       const displayName = typeof req.query.displayName === 'string' ? req.query.displayName : 'archivo';
 
       if (!storagePath) return res.status(400).json({ error: 'Ruta de archivo faltante.' });
+
+      if (isUserPrivateBlobPath(uid, storagePath)) {
+        const blob = await get(storagePath, { access: 'private' });
+        if (!blob?.stream) return res.status(404).json({ error: 'El archivo no está disponible.' });
+        res.setHeader('Content-Type', blob.blob.contentType || normalizeMimeType(mimeType));
+        res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(displayName)}"`);
+        res.setHeader('Cache-Control', 'private, no-store');
+        await pipeline(Readable.from(blob.stream as AsyncIterable<Uint8Array>), res);
+        return;
+      }
+
       const resolved = resolveUserStoragePath(uid, storagePath);
       const data = await fs.readFile(resolved);
-      res.setHeader('Content-Type', mimeType);
+      res.setHeader('Content-Type', normalizeMimeType(mimeType));
       res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(displayName)}"`);
+      res.setHeader('Cache-Control', 'private, no-store');
       res.send(data);
     } catch (err) {
       const code = (err as NodeJS.ErrnoException)?.code;
@@ -799,8 +850,12 @@ app.use(express.json({ limit: '45mb' }));
       const uid = req.user!.uid;
       const storagePath = typeof req.body?.storagePath === 'string' ? req.body.storagePath : '';
       if (storagePath) {
-        const resolved = resolveUserStoragePath(uid, storagePath);
-        await fs.unlink(resolved).catch(() => {});
+        if (isUserPrivateBlobPath(uid, storagePath)) {
+          await del(storagePath);
+        } else {
+          const resolved = resolveUserStoragePath(uid, storagePath);
+          await fs.unlink(resolved).catch(() => {});
+        }
       }
       res.json({ ok: true });
     } catch (err) {

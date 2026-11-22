@@ -6,6 +6,7 @@ import {
   Check,
   Copy,
   Download,
+  Eye,
   Edit3,
   Link2,
   Mic,
@@ -90,6 +91,7 @@ export function InboxView({
   const [resolvingActionId, setResolvingActionId] = useState<number | null>(null);
   const [copiedMsgId, setCopiedMsgId] = useState<number | null>(null);
   const [editingMsgId, setEditingMsgId] = useState<number | null>(null);
+  const [openImageAttachmentId, setOpenImageAttachmentId] = useState<number | null>(null);
   const [editMsgContent, setEditMsgContent] = useState('');
   const [regenerating, setRegenerating] = useState(false);
 
@@ -849,24 +851,20 @@ export function InboxView({
                                   .filter(
                                     (att) => att.mimeType?.startsWith('image/') && (att.fileId || att.previewDataUrl),
                                   )
-                                  .map((att) =>
-                                    att.previewDataUrl ? (
-                                      <img
-                                        key={att.id}
-                                        src={att.previewDataUrl}
-                                        alt={att.fileName || 'Imagen adjunta al mensaje'}
-                                        className="max-h-64 max-w-full rounded-xl object-contain bg-black/10"
-                                      />
-                                    ) : (
-                                      <PrivateImagePreview
-                                        key={att.id}
-                                        fileId={att.fileId!}
-                                        alt={att.fileName || 'Imagen adjunta al mensaje'}
-                                        lazy
-                                        className="max-h-64 max-w-full rounded-xl object-contain bg-black/10"
-                                      />
-                                    ),
-                                  )}
+                                  .map((att) => (
+                                    <PrivateImagePreview
+                                      key={att.id}
+                                      fileId={att.fileId ?? undefined}
+                                      src={att.previewDataUrl}
+                                      alt={att.fileName || 'Imagen adjunta al mensaje'}
+                                      lazy={!att.previewDataUrl}
+                                      open={openImageAttachmentId === att.id}
+                                      onOpenChange={(isOpen) =>
+                                        setOpenImageAttachmentId(isOpen ? att.id : null)
+                                      }
+                                      className="max-h-64 max-w-full rounded-xl object-contain bg-black/10"
+                                    />
+                                  ))}
                               </div>
                             )}
                             {m.attachments.map((att) => (
@@ -880,12 +878,23 @@ export function InboxView({
                                   <button
                                     type="button"
                                     onClick={() =>
-                                      handleDownloadAttachment(att.fileId!, att.fileName!)
+                                      att.mimeType?.startsWith('image/')
+                                        ? setOpenImageAttachmentId(att.id)
+                                        : handleDownloadAttachment(att.fileId!, att.fileName!)
+                                    }
+                                    aria-label={
+                                      att.mimeType?.startsWith('image/')
+                                        ? `Ver ${att.fileName}`
+                                        : `Descargar ${att.fileName}`
                                     }
                                     className="inline-flex items-center gap-1 underline shrink-0 cursor-pointer"
                                   >
-                                    <Download className="w-3 h-3" />
-                                    <span>Abrir</span>
+                                    {att.mimeType?.startsWith('image/') ? (
+                                      <Eye className="w-3 h-3" />
+                                    ) : (
+                                      <Download className="w-3 h-3" />
+                                    )}
+                                    <span>{att.mimeType?.startsWith('image/') ? 'Ver' : 'Descargar'}</span>
                                   </button>
                                 )}
                               </div>
