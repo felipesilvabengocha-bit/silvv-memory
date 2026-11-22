@@ -3217,10 +3217,17 @@ export async function dispatchSilvvRequest<T>(rawPath: string, options: RequestI
             conversationId: sourceMessage.conversationId,
             content: sourceMessage.content,
             createdAt: sourceMessage.createdAt,
+            attachments: sourceMessage.attachments || [],
           }
         : null,
       sourceFile: sourceFile
-        ? { id: sourceFile.id, displayName: sourceFile.displayName, aiSummary: sourceFile.aiSummary }
+        ? {
+            id: sourceFile.id,
+            displayName: sourceFile.displayName,
+            mimeType: sourceFile.mimeType,
+            fileKind: sourceFile.fileKind,
+            aiSummary: sourceFile.aiSummary,
+          }
         : null,
       entities: (mem.entities || []).map((name) => ({
         relationType: 'mentions',

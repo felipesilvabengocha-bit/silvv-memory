@@ -29,6 +29,7 @@ import {
   type ProjectItem,
 } from '../lib/api';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { PrivateImagePreview } from './PrivateImagePreview';
 
 interface InboxViewProps {
   projects: ProjectItem[];
@@ -827,6 +828,21 @@ export function InboxView({
 
                         {m.attachments && m.attachments.length > 0 && (
                           <div className="mt-2.5 pt-2 border-t border-white/20 dark:border-white/10 space-y-1 text-xs opacity-90">
+                            {m.attachments.some((att) => att.fileId && att.mimeType?.startsWith('image/')) && (
+                              <div className="mb-2 flex flex-wrap gap-2">
+                                {m.attachments
+                                  .filter((att) => att.fileId && att.mimeType?.startsWith('image/'))
+                                  .map((att) => (
+                                    <PrivateImagePreview
+                                      key={att.id}
+                                      fileId={att.fileId!}
+                                      alt={att.fileName || 'Imagen adjunta al mensaje'}
+                                      lazy
+                                      className="max-h-64 max-w-full rounded-xl object-contain bg-black/10"
+                                    />
+                                  ))}
+                              </div>
+                            )}
                             {m.attachments.map((att) => (
                               <div key={att.id} className="flex items-center justify-between gap-3">
                                 <span className="truncate">
@@ -1031,6 +1047,13 @@ export function InboxView({
                     key={att.id}
                     className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl glass-subtle text-zinc-800 dark:text-zinc-200"
                   >
+                    {att.mimeType.startsWith('image/') && (
+                      <img
+                        src={`data:${att.mimeType};base64,${att.base64Data}`}
+                        alt={`Vista previa de ${att.name}`}
+                        className="h-12 w-12 rounded-lg object-cover"
+                      />
+                    )}
                     <span className="truncate max-w-[180px]">
                       {att.name} · {(att.sizeBytes / 1024).toFixed(0)} KB
                     </span>
