@@ -1021,7 +1021,7 @@ export function InboxView({
         {/* Sticky Docked Composer */}
         <form
           onSubmit={handleSend}
-          className={`px-4 sm:px-8 pt-3 ${mobileKeyboardOpen ? 'pb-3' : 'pb-[max(0.75rem,env(safe-area-inset-bottom))]'} border-t border-zinc-200/70 dark:border-white/10 glass-panel shrink-0`}
+          className={`px-4 sm:px-8 pt-3 ${mobileKeyboardOpen ? 'pb-3' : 'mb-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]'} border-t border-zinc-200/70 dark:border-white/10 glass-panel shrink-0 lg:mb-0`}
         >
           <div className="max-w-4xl mx-auto space-y-2.5">
             {(attachments.length > 0 || showLinkInput) && (
