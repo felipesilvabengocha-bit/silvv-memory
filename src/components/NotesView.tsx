@@ -33,6 +33,7 @@ import {
 import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface NotesViewProps {
+  isActive: boolean;
   onDataChanged: () => void;
   onAskInChat?: (prompt: string) => void;
 }
@@ -251,7 +252,7 @@ function AttachmentThumb({
   );
 }
 
-export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
+export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewProps) {
   const [notes, setNotes] = useState<NoteItem[]>([]);
   const [folders, setFolders] = useState<NoteFolderItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -288,59 +289,79 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hydratingRef = useRef(false);
   const foldersRef = useRef<NoteFolderItem[]>([]);
+  const foldersLoadedRef = useRef(false);
+  const loadRequestIdRef = useRef(0);
   const smartRootFoldersPromiseRef = useRef<Promise<NoteFolderItem[]> | null>(null);
+  const draftTitleEditedRef = useRef(false);
 
   const loadAll = async (q = searchQuery) => {
-    if (!q.trim()) setLoading(true);
+    const requestId = ++loadRequestIdRef.current;
+    if (!q.trim()) setLoading(notes.length === 0);
     else setSearching(true);
     setError(null);
+
+    if (!foldersLoadedRef.current) {
+      void apiRequest<NoteFolderItem[]>('/api/note-folders')
+        .then(async (folderList) => {
+          if (requestId !== loadRequestIdRef.current) return;
+          foldersLoadedRef.current = true;
+          foldersRef.current = folderList;
+          setFolders(folderList);
+
+          let rootFoldersPromise = smartRootFoldersPromiseRef.current;
+          if (!rootFoldersPromise) {
+            rootFoldersPromise = ensureSmartRootFolders(folderList);
+            smartRootFoldersPromiseRef.current = rootFoldersPromise;
+          }
+          try {
+            const initializedFolders = await rootFoldersPromise;
+            if (requestId !== loadRequestIdRef.current) return;
+            foldersRef.current = initializedFolders;
+            setFolders(initializedFolders);
+          } catch {
+            if (requestId === loadRequestIdRef.current) {
+              setError('No se pudieron preparar las carpetas inteligentes. Podés seguir usando tus notas.');
+            }
+          } finally {
+            if (smartRootFoldersPromiseRef.current === rootFoldersPromise) {
+              smartRootFoldersPromiseRef.current = null;
+            }
+          }
+        })
+        .catch((err) => {
+          if (requestId === loadRequestIdRef.current) {
+            setError(err instanceof Error ? err.message : 'No se pudieron cargar las carpetas.');
+          }
+        });
+    }
+
     try {
       const notesUrl = q.trim().length >= 2 ? `/api/notes?q=${encodeURIComponent(q.trim())}` : '/api/notes';
-      const [noteList, folderList] = await Promise.all([
-        apiRequest<NoteItem[]>(notesUrl),
-        apiRequest<NoteFolderItem[]>('/api/note-folders'),
-      ]);
-      foldersRef.current = folderList;
+      const noteList = await apiRequest<NoteItem[]>(notesUrl);
+      if (requestId !== loadRequestIdRef.current) return;
       setNotes(noteList);
-      setFolders(folderList);
       setSelectedNoteId((prev) => {
         if (prev && noteList.some((n) => n.id === prev)) return prev;
         return noteList[0]?.id ?? null;
       });
-
-      let rootFoldersPromise = smartRootFoldersPromiseRef.current;
-      if (!rootFoldersPromise) {
-        rootFoldersPromise = ensureSmartRootFolders(folderList);
-        smartRootFoldersPromiseRef.current = rootFoldersPromise;
-      }
-      void rootFoldersPromise
-        .then((initializedFolders) => {
-          if (smartRootFoldersPromiseRef.current !== rootFoldersPromise) return;
-          foldersRef.current = initializedFolders;
-          setFolders(initializedFolders);
-        })
-        .catch(() => {
-          setError('No se pudieron preparar las carpetas inteligentes. Podés seguir usando tus notas.');
-        })
-        .finally(() => {
-          if (smartRootFoldersPromiseRef.current === rootFoldersPromise) {
-            smartRootFoldersPromiseRef.current = null;
-          }
-        });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al cargar tus notas.');
+      if (requestId === loadRequestIdRef.current) {
+        setError(err instanceof Error ? err.message : 'Error al cargar tus notas.');
+      }
     } finally {
-      setLoading(false);
-      setSearching(false);
+      if (requestId === loadRequestIdRef.current) {
+        setLoading(false);
+        setSearching(false);
+      }
     }
   };
 
   useEffect(() => {
-    if (searchQuery.trim().length > 0 && searchQuery.trim().length < 2) return;
+    if (!isActive || (searchQuery.trim().length > 0 && searchQuery.trim().length < 2)) return;
     const delay = searchQuery.trim().length >= 2 ? 280 : 0;
     const handle = window.setTimeout(() => void loadAll(searchQuery), delay);
     return () => window.clearTimeout(handle);
-  }, [searchQuery]);
+  }, [searchQuery, isActive]);
 
   useEffect(() => {
     foldersRef.current = folders;
@@ -358,6 +379,7 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
       autoSaveTimerRef.current = null;
     }
     hydratingRef.current = true;
+    draftTitleEditedRef.current = false;
     if (activeNote) {
       setDraftTitle(activeNote.title);
       setDraftContent(activeNote.content);
@@ -456,7 +478,7 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
 
         foldersRef.current = folderPath.folders;
         setFolders(folderPath.folders);
-        setDraftTitle(organization.title);
+        if (!draftTitleEditedRef.current) setDraftTitle(organization.title);
         setDraftFolderId(folderPath.folderId);
       } catch (err) {
         if (!cancelled) {
@@ -902,7 +924,7 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
     <div
       className={
         editorOpen
-          ? 'fixed inset-0 z-[70] h-[var(--silvv-visual-viewport-height,100dvh)] w-full overflow-hidden bg-zinc-50 dark:bg-[#09090B] silvv-ambient-bg'
+          ? 'fixed inset-0 z-[70] w-full overflow-hidden bg-zinc-50 dark:bg-[#09090B] silvv-ambient-bg'
           : 'space-y-5 animate-silvv-in'
       }
     >
@@ -1218,7 +1240,7 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
           <div
             className={
               editorOpen
-                ? 'h-full min-h-0 w-full glass-panel rounded-none border-0 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] sm:px-8 flex flex-col gap-4 overflow-y-auto animate-silvv-editor-in'
+                ? 'h-full min-h-0 w-full glass-panel rounded-none border-0 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] sm:px-8 flex flex-col gap-4 overflow-y-auto lg:animate-silvv-editor-in'
                 : 'xl:col-span-7 glass-panel rounded-2xl p-5 flex flex-col gap-4 min-h-[560px]'
             }
           >
@@ -1269,11 +1291,6 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
                             : 'Sincronizado'}
                       </span>
                     </div>
-                    <h1 className="truncate font-display text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-50 sm:text-xl">
-                      {draftTitle === 'Generando título…' && !draftContent.trim()
-                        ? 'Tu nueva nota'
-                        : draftTitle || 'Nota nueva'}
-                    </h1>
                     <p className="mt-0.5 text-[11px] text-zinc-500 dark:text-zinc-400 tabular-nums">
                       Creada {formatDate(activeNote.createdAt)} · Actualizada {formatDate(activeNote.updatedAt)}
                     </p>
@@ -1336,17 +1353,34 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] text-zinc-500 dark:text-zinc-400 mb-1">
+                <div className="grid grid-cols-1 gap-3 rounded-2xl border border-zinc-200/70 bg-white/45 p-3 dark:border-white/10 dark:bg-white/[0.025] sm:grid-cols-12 sm:gap-3.5">
+                  <div className="sm:col-span-4">
+                    <label htmlFor="note-title" className="mb-1 block text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+                      Título
+                    </label>
+                    <input
+                      id="note-title"
+                      type="text"
+                      value={draftTitle === 'Generando título…' ? '' : draftTitle}
+                      onChange={(e) => {
+                        draftTitleEditedRef.current = true;
+                        setDraftTitle(e.target.value);
+                      }}
+                      placeholder={draftTitle === 'Generando título…' ? 'Creando título…' : 'Nota nueva'}
+                      className="w-full rounded-xl border border-zinc-200/80 bg-white/70 px-3 py-2 text-base text-zinc-900 dark:border-white/10 dark:bg-black/30 dark:text-zinc-100 sm:text-sm"
+                    />
+                  </div>
+                  <div className="sm:col-span-4">
+                    <label htmlFor="note-folder" className="mb-1 block text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
                       Carpeta
                     </label>
                     <select
+                      id="note-folder"
                       value={draftFolderId ?? ''}
                       onChange={(e) =>
                         setDraftFolderId(e.target.value ? Number(e.target.value) : null)
                       }
-                      className="w-full px-3 py-1.5 rounded-xl border border-zinc-200/80 dark:border-white/10 bg-white/70 dark:bg-black/30 text-base sm:text-xs text-zinc-900 dark:text-zinc-100"
+                      className="w-full rounded-xl border border-zinc-200/80 bg-white/70 px-3 py-2 text-base text-zinc-900 dark:border-white/10 dark:bg-black/30 dark:text-zinc-100 sm:text-sm"
                     >
                       <option value="">Sin carpeta (por clasificar)</option>
                       {folders.map((folder) => (
@@ -1356,16 +1390,17 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
                       ))}
                     </select>
                   </div>
-                  <div>
-                    <label className="block text-[11px] text-zinc-500 dark:text-zinc-400 mb-1">
-                      Etiquetas (separadas por coma)
+                  <div className="sm:col-span-4">
+                    <label htmlFor="note-tags" className="mb-1 block text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+                      Etiquetas
                     </label>
                     <input
+                      id="note-tags"
                       type="text"
                       value={draftTagsText}
                       onChange={(e) => setDraftTagsText(e.target.value)}
                       placeholder="ideas, estudio, proyecto"
-                      className="w-full px-3 py-1.5 rounded-xl border border-zinc-200/80 dark:border-white/10 bg-white/70 dark:bg-black/30 text-base sm:text-xs text-zinc-900 dark:text-zinc-100"
+                      className="w-full rounded-xl border border-zinc-200/80 bg-white/70 px-3 py-2 text-base text-zinc-900 dark:border-white/10 dark:bg-black/30 dark:text-zinc-100 sm:text-sm"
                     />
                   </div>
                 </div>

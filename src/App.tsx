@@ -106,6 +106,7 @@ export default function App() {
   const [dashError, setDashError] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
+  const [notesVisited, setNotesVisited] = useState(false);
   const [selectedConvId, setSelectedConvId] = useState<number | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -172,6 +173,10 @@ export default function App() {
       document.documentElement.style.removeProperty('--silvv-visual-viewport-height');
     };
   }, []);
+
+  useEffect(() => {
+    if (activeTab === 'notes') setNotesVisited(true);
+  }, [activeTab]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -492,7 +497,7 @@ export default function App() {
             <main
               className={
                 isFullBleedChat
-                  ? `flex-1 w-full min-h-0 overflow-hidden ${mobileKeyboardOpen ? 'h-[calc(var(--silvv-visual-viewport-height,100dvh)-3.5rem-env(safe-area-inset-top))]' : 'h-[calc(100dvh-3.5rem-env(safe-area-inset-top)-3.25rem-env(safe-area-inset-bottom))]'} lg:h-[calc(100dvh-3.5rem)]`
+                  ? `flex-1 w-full min-h-0 overflow-hidden ${mobileKeyboardOpen ? 'h-[calc(var(--silvv-visual-viewport-height,100dvh)-3.5rem-env(safe-area-inset-top))] pb-0' : 'pb-[calc(3.25rem+env(safe-area-inset-bottom))]'} lg:h-[calc(100dvh-3.5rem)] lg:pb-0`
                   : 'flex-1 max-w-6xl w-full mx-auto px-4 sm:px-8 py-6 pb-24 lg:pb-8'
               }
             >
@@ -520,8 +525,15 @@ export default function App() {
                 />
               )}
 
-              {activeTab === 'notes' && (
-                <NotesView onDataChanged={loadWorkspace} onAskInChat={handleQuickSend} />
+              {(activeTab === 'notes' || notesVisited) && (
+                <div className={activeTab === 'notes' ? 'contents' : 'hidden'}>
+                  <NotesView
+                    key={firebaseUser.uid}
+                    isActive={activeTab === 'notes'}
+                    onDataChanged={loadWorkspace}
+                    onAskInChat={handleQuickSend}
+                  />
+                </div>
               )}
 
               {activeTab === 'memory' && (
