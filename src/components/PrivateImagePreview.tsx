@@ -23,7 +23,6 @@ export function PrivateImagePreview({
   onOpenChange,
 }: PrivateImagePreviewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const previousOverflowRef = useRef<string | undefined>(undefined);
   const [shouldLoad, setShouldLoad] = useState(!lazy || Boolean(src));
@@ -106,7 +105,6 @@ export function PrivateImagePreview({
       <div ref={containerRef}>
         {resolvedUrl ? (
           <button
-            ref={triggerRef}
             type="button"
             onClick={() => setOpen(true)}
             aria-label={`Ampliar ${alt}`}
@@ -142,15 +140,19 @@ export function PrivateImagePreview({
             ref={dialogRef}
             aria-label={alt}
             onClose={() => setOpen(false)}
+            onCancel={(event) => {
+              event.preventDefault();
+              setOpen(false);
+            }}
             onClick={(event) => {
-              if (event.target === event.currentTarget) dialogRef.current?.close();
+              if (event.target === event.currentTarget) setOpen(false);
             }}
             className="fixed inset-0 m-auto flex max-h-[100dvh] max-w-[100vw] items-center justify-center border-0 bg-transparent p-4 text-white backdrop:bg-black/90"
           >
             <div className="relative flex max-h-full max-w-full flex-col items-center gap-3">
               <button
                 type="button"
-                onClick={() => dialogRef.current?.close()}
+                onClick={() => setOpen(false)}
                 aria-label="Cerrar imagen"
                 className="absolute -right-2 -top-2 z-10 flex size-10 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
               >
