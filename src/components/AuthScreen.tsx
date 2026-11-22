@@ -48,7 +48,7 @@ export function AuthScreen() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-[#09090B] silvv-ambient-bg text-zinc-900 dark:text-zinc-100 flex flex-col justify-between px-6 py-10 md:px-12">
+    <div className="min-h-screen bg-zinc-50 dark:bg-[#09090B] silvv-ambient-bg text-zinc-900 dark:text-zinc-100 flex flex-col justify-between px-6 py-10 md:px-12 animate-silvv-view-in">
       <header className="max-w-5xl w-full mx-auto flex items-center justify-between gap-4">
         <span className="font-display text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-50 whitespace-nowrap shrink-0">
           SILVV MEMORY
