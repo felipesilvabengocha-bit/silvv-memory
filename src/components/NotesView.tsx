@@ -300,28 +300,33 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
         apiRequest<NoteItem[]>(notesUrl),
         apiRequest<NoteFolderItem[]>('/api/note-folders'),
       ]);
+      foldersRef.current = folderList;
+      setNotes(noteList);
+      setFolders(folderList);
+      setSelectedNoteId((prev) => {
+        if (prev && noteList.some((n) => n.id === prev)) return prev;
+        return noteList[0]?.id ?? null;
+      });
+
       let rootFoldersPromise = smartRootFoldersPromiseRef.current;
       if (!rootFoldersPromise) {
         rootFoldersPromise = ensureSmartRootFolders(folderList);
         smartRootFoldersPromiseRef.current = rootFoldersPromise;
       }
-      let initializedFolders = folderList;
-      try {
-        initializedFolders = await rootFoldersPromise;
-      } catch {
-        setError('No se pudieron preparar las carpetas inteligentes. Podés seguir usando tus notas.');
-      } finally {
-        if (smartRootFoldersPromiseRef.current === rootFoldersPromise) {
-          smartRootFoldersPromiseRef.current = null;
-        }
-      }
-      foldersRef.current = initializedFolders;
-      setNotes(noteList);
-      setFolders(initializedFolders);
-      setSelectedNoteId((prev) => {
-        if (prev && noteList.some((n) => n.id === prev)) return prev;
-        return noteList[0]?.id ?? null;
-      });
+      void rootFoldersPromise
+        .then((initializedFolders) => {
+          if (smartRootFoldersPromiseRef.current !== rootFoldersPromise) return;
+          foldersRef.current = initializedFolders;
+          setFolders(initializedFolders);
+        })
+        .catch(() => {
+          setError('No se pudieron preparar las carpetas inteligentes. Podés seguir usando tus notas.');
+        })
+        .finally(() => {
+          if (smartRootFoldersPromiseRef.current === rootFoldersPromise) {
+            smartRootFoldersPromiseRef.current = null;
+          }
+        });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al cargar tus notas.');
     } finally {
@@ -331,21 +336,15 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
   };
 
   useEffect(() => {
-    loadAll('');
-  }, []);
+    if (searchQuery.trim().length > 0 && searchQuery.trim().length < 2) return;
+    const delay = searchQuery.trim().length >= 2 ? 280 : 0;
+    const handle = window.setTimeout(() => void loadAll(searchQuery), delay);
+    return () => window.clearTimeout(handle);
+  }, [searchQuery]);
 
   useEffect(() => {
     foldersRef.current = folders;
   }, [folders]);
-
-  useEffect(() => {
-    const handle = setTimeout(() => {
-      if (searchQuery.trim().length === 0 || searchQuery.trim().length >= 2) {
-        void loadAll(searchQuery);
-      }
-    }, 280);
-    return () => clearTimeout(handle);
-  }, [searchQuery]);
 
   const activeNote = useMemo(
     () => notes.find((n) => n.id === selectedNoteId) || null,
@@ -530,6 +529,10 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
     setError(null);
     try {
       const content = isQuick ? (customText || '').trim() : '';
+      const pendingFolderSetup = smartRootFoldersPromiseRef.current;
+      if (pendingFolderSetup) {
+        foldersRef.current = await pendingFolderSetup.catch(() => foldersRef.current);
+      }
       const selectedFolder =
         typeof selectedFolderId === 'number'
           ? foldersRef.current.find((folder) => folder.id === selectedFolderId)
@@ -840,7 +843,7 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
                     if (e.key === 'Enter') handleRenameFolder(fld.id);
                     if (e.key === 'Escape') setRenamingFolderId(null);
                   }}
-                  className="flex-1 min-w-0 px-2 py-1 rounded border border-violet-500 bg-white dark:bg-[#09090B] text-xs"
+                  className="flex-1 min-w-0 px-2 py-1 rounded border border-violet-500 bg-white dark:bg-[#09090B] text-base sm:text-xs"
                 />
                 <button
                   type="button"
@@ -960,7 +963,7 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
             value={quickText}
             onChange={(e) => setQuickText(e.target.value)}
             placeholder="Escribí una nota rápida (Enter para guardar al instante)..."
-            className="flex-1 min-w-0 px-3.5 py-2 rounded-xl border border-zinc-200/80 dark:border-white/10 bg-white/70 dark:bg-black/30 text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+            className="flex-1 min-w-0 px-3.5 py-2 rounded-xl border border-zinc-200/80 dark:border-white/10 bg-white/70 dark:bg-black/30 text-base sm:text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
           />
           <div className="flex items-center gap-2 shrink-0">
             <button
@@ -1041,14 +1044,14 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
                   value={newFolderName}
                   onChange={(e) => setNewFolderName(e.target.value)}
                   placeholder="Nombre..."
-                  className="w-full px-2.5 py-1.5 rounded-lg border border-zinc-200 dark:border-white/10 bg-white/80 dark:bg-black/40 text-xs"
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-zinc-200 dark:border-white/10 bg-white/80 dark:bg-black/40 text-base sm:text-xs"
                 />
                 <select
                   value={newFolderParentId}
                   onChange={(e) =>
                     setNewFolderParentId(e.target.value ? Number(e.target.value) : '')
                   }
-                  className="w-full px-2 py-1.5 rounded-lg border border-zinc-200 dark:border-white/10 bg-white/80 dark:bg-black/40 text-xs"
+                  className="w-full px-2 py-1.5 rounded-lg border border-zinc-200 dark:border-white/10 bg-white/80 dark:bg-black/40 text-base sm:text-xs"
                 >
                   <option value="">Carpeta raíz</option>
                   {folders.map((f) => (
@@ -1130,7 +1133,7 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Buscar por palabras o significado..."
-                  className="w-full pl-9 pr-8 py-2 rounded-xl border border-zinc-200/80 dark:border-white/10 bg-white/70 dark:bg-black/30 text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+                  className="w-full pl-9 pr-8 py-2 rounded-xl border border-zinc-200/80 dark:border-white/10 bg-white/70 dark:bg-black/30 text-base sm:text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
                 />
                 {searchQuery && (
                   <button
@@ -1343,7 +1346,7 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
                       onChange={(e) =>
                         setDraftFolderId(e.target.value ? Number(e.target.value) : null)
                       }
-                      className="w-full px-3 py-1.5 rounded-xl border border-zinc-200/80 dark:border-white/10 bg-white/70 dark:bg-black/30 text-xs text-zinc-900 dark:text-zinc-100"
+                      className="w-full px-3 py-1.5 rounded-xl border border-zinc-200/80 dark:border-white/10 bg-white/70 dark:bg-black/30 text-base sm:text-xs text-zinc-900 dark:text-zinc-100"
                     >
                       <option value="">Sin carpeta (por clasificar)</option>
                       {folders.map((folder) => (
@@ -1362,7 +1365,7 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
                       value={draftTagsText}
                       onChange={(e) => setDraftTagsText(e.target.value)}
                       placeholder="ideas, estudio, proyecto"
-                      className="w-full px-3 py-1.5 rounded-xl border border-zinc-200/80 dark:border-white/10 bg-white/70 dark:bg-black/30 text-xs text-zinc-900 dark:text-zinc-100"
+                      className="w-full px-3 py-1.5 rounded-xl border border-zinc-200/80 dark:border-white/10 bg-white/70 dark:bg-black/30 text-base sm:text-xs text-zinc-900 dark:text-zinc-100"
                     />
                   </div>
                 </div>
@@ -1377,7 +1380,7 @@ export function NotesView({ onDataChanged, onAskInChat }: NotesViewProps) {
                     value={draftContent}
                     onChange={(e) => setDraftContent(e.target.value)}
                     placeholder="Escribí libremente tus ideas, apuntes, borradores o listas (admite Markdown)..."
-                    className={`flex-1 ${editorOpen ? 'min-h-[140px]' : 'min-h-[260px]'} w-full resize-none p-4 rounded-xl border border-zinc-200/80 dark:border-white/10 bg-white/60 dark:bg-black/25 text-sm text-zinc-900 dark:text-zinc-100 leading-relaxed focus:outline-none focus:ring-2 focus:ring-violet-500/35`}
+                    className={`flex-1 ${editorOpen ? 'min-h-[140px]' : 'min-h-[260px]'} w-full resize-none p-4 rounded-xl border border-zinc-200/80 dark:border-white/10 bg-white/60 dark:bg-black/25 text-base sm:text-sm text-zinc-900 dark:text-zinc-100 leading-relaxed focus:outline-none focus:ring-2 focus:ring-violet-500/35`}
                   />
                 )}
 
