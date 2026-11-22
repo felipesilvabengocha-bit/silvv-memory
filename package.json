@@ -7,7 +7,8 @@
     "node": "24.x"
   },
   "scripts": {
-    "dev": "tsx server.ts",
+    "dev": "DOTENV_CONFIG_PATH=.env.development.local tsx server.ts",
+    "test:dev": "firebase emulators:exec --project demo-silvv-memory --only auth,firestore \"env DISABLE_HMR=true PORT=3001 VITE_FIREBASE_EMULATORS=true FIREBASE_PROJECT_ID=demo-silvv-memory FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 bun run dev\"",
     "build": "vite build",
     "start": "node server.ts",
     "preview": "vite preview",
@@ -41,6 +42,7 @@
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
     "eslint": "^10.15.0",
+    "firebase-tools": "^15.37.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2"

@@ -9,7 +9,11 @@ import {
   MessageSquare,
   StickyNote,
 } from 'lucide-react';
-import { signInWithGoogleAndCaptureToken } from '../lib/firebase';
+import {
+  isFirebaseEmulatorEnabled,
+  signInWithEmulatorGoogleUser,
+  signInWithGoogleAndCaptureToken,
+} from '../lib/firebase';
 
 export function AuthScreen() {
   const [loading, setLoading] = useState(false);
@@ -23,6 +27,20 @@ export function AuthScreen() {
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'No se pudo iniciar sesión con Google.';
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEmulatorSignIn = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      await signInWithEmulatorGoogleUser();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'No se pudo iniciar la sesión de prueba.';
       setError(message);
     } finally {
       setLoading(false);
@@ -66,6 +84,25 @@ export function AuthScreen() {
               Tus conversaciones, notas, archivos y memoria son privados por cuenta.
             </span>
           </div>
+
+          {isFirebaseEmulatorEnabled && (
+            <div className="max-w-md rounded-xl border border-emerald-300/70 dark:border-emerald-900/70 bg-emerald-50/70 dark:bg-emerald-950/20 p-4 space-y-2">
+              <p className="text-xs font-medium text-emerald-800 dark:text-emerald-300">
+                Entorno aislado de pruebas
+              </p>
+              <p className="text-xs leading-relaxed text-emerald-800/80 dark:text-emerald-200/80">
+                Usa Auth y Firestore locales. No inicia sesión con Google ni accede a datos de producción.
+              </p>
+              <button
+                type="button"
+                onClick={handleEmulatorSignIn}
+                disabled={loading}
+                className="inline-flex min-h-10 items-center justify-center rounded-lg border border-emerald-700/30 bg-white/80 px-4 py-2 text-sm font-medium text-emerald-900 transition-colors hover:bg-white disabled:opacity-60 dark:bg-emerald-900/30 dark:text-emerald-100 dark:hover:bg-emerald-900/50"
+              >
+                {loading ? 'Iniciando sesión...' : 'Entrar como usuario de prueba'}
+              </button>
+            </div>
+          )}
 
           {error && (
             <div className="p-3.5 rounded-xl border border-red-300 dark:border-red-900/60 bg-red-50 dark:bg-red-950/30 text-sm text-red-700 dark:text-red-300 max-w-md">
