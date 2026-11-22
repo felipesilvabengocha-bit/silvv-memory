@@ -313,6 +313,7 @@ export interface MessageAttachment {
   aiSummary: string | null;
   detectedCategory: string | null;
   previewDataUrl?: string;
+  previewUrl?: string;
 }
 
 export interface ProposedActionCard {
@@ -484,6 +485,50 @@ export interface SearchHit {
 
 export async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
   return dispatchSilvvRequest<T>(path, options);
+}
+
+export async function uploadPrivateChatAttachment(
+  file: File,
+): Promise<{ storagePath: string; sizeBytes: number }> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('No hay sesión activa.');
+
+  const token = await user.getIdToken();
+  const params = new URLSearchParams({
+    name: file.name,
+    mimeType: file.type || 'application/octet-stream',
+  });
+  const response = await fetch(`/api/files/upload?${params.toString()}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/octet-stream',
+    },
+    body: file,
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(result.error || 'No se pudo subir el adjunto.');
+  }
+  return result as { storagePath: string; sizeBytes: number };
+}
+
+export async function deletePrivateStorageFile(storagePath: string): Promise<void> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('No hay sesión activa.');
+
+  const token = await user.getIdToken();
+  const response = await fetch('/api/files/blob', {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ storagePath }),
+  });
+  if (!response.ok) {
+    throw new Error('No se pudo eliminar el adjunto.');
+  }
 }
 
 export async function fetchPrivateFileBlobUrl(fileId: number): Promise<string> {

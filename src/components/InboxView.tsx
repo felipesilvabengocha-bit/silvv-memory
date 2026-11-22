@@ -24,7 +24,9 @@ import {
 } from 'lucide-react';
 import {
   apiRequest,
+  deletePrivateStorageFile,
   fetchPrivateFileBlobUrl,
+  uploadPrivateChatAttachment,
   type ConversationItem,
   type MessageItem,
   type ProjectItem,
@@ -46,7 +48,57 @@ interface PendingAttachment {
   name: string;
   mimeType: string;
   sizeBytes: number;
-  base64Data: string;
+  base64Data?: string;
+  storagePath?: string;
+  file?: File;
+  previewUrl?: string;
+}
+
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+const MAX_IMAGE_UPLOAD_BYTES = 3 * 1024 * 1024;
+
+async function prepareImageForUpload(file: File): Promise<File> {
+  if (file.size <= MAX_IMAGE_UPLOAD_BYTES) return file;
+  if (file.type === 'image/gif' || file.type === 'image/svg+xml') {
+    throw new Error('Esta imagen supera 3 MB y no se puede optimizar automáticamente.');
+  }
+
+  let image: ImageBitmap;
+  try {
+    image = await createImageBitmap(file);
+  } catch {
+    throw new Error('No se pudo optimizar esta imagen. Elegí una versión más liviana.');
+  }
+
+  try {
+    const outputType = file.type === 'image/png' || file.type === 'image/webp' ? 'image/webp' : 'image/jpeg';
+    let scale = Math.min(1, 2560 / Math.max(image.width, image.height));
+
+    for (let resizeAttempt = 0; resizeAttempt < 7; resizeAttempt += 1) {
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(image.width * scale));
+      canvas.height = Math.max(1, Math.round(image.height * scale));
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('No se pudo optimizar esta imagen.');
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+      for (const quality of [0.84, 0.76, 0.68, 0.6]) {
+        const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, outputType, quality));
+        if (!blob) continue;
+        if (blob.size <= MAX_IMAGE_UPLOAD_BYTES) {
+          const mimeType = blob.type || outputType;
+          const extension = mimeType === 'image/webp' ? '.webp' : mimeType === 'image/png' ? '.png' : '.jpg';
+          const name = `${file.name.replace(/\.[^.]+$/, '')}${extension}`;
+          return new File([blob], name, { type: mimeType, lastModified: file.lastModified });
+        }
+      }
+      scale *= 0.8;
+    }
+  } finally {
+    image.close();
+  }
+
+  throw new Error('No se pudo reducir la imagen al tamaño máximo de carga.');
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -96,6 +148,7 @@ export function InboxView({
   const [regenerating, setRegenerating] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const previewUrlsRef = useRef(new Set<string>());
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -135,6 +188,14 @@ export function InboxView({
   useEffect(() => {
     loadConversations(showArchived);
   }, [showArchived]);
+
+  useEffect(
+    () => () => {
+      for (const previewUrl of previewUrlsRef.current) URL.revokeObjectURL(previewUrl);
+      previewUrlsRef.current.clear();
+    },
+    [],
+  );
 
   useEffect(() => {
     if (initialConversationId) {
@@ -253,31 +314,66 @@ export function InboxView({
     setError(null);
 
     for (const file of fileList) {
-      if (file.size > 20 * 1024 * 1024) {
+      if (file.size > MAX_UPLOAD_BYTES) {
         setError(`"${file.name}" supera el límite de 20 MB.`);
         continue;
       }
-      const base64 = await new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const result = typeof reader.result === 'string' ? reader.result : '';
-          resolve(result.includes(',') ? result.split(',')[1] : result);
-        };
-        reader.readAsDataURL(file);
-      });
 
-      setAttachments((prev) => [
-        ...prev,
-        {
-          id: `${file.name}-${Date.now()}-${Math.random()}`,
-          name: file.name,
-          mimeType: file.type || 'application/octet-stream',
-          sizeBytes: file.size,
-          base64Data: base64,
-        },
-      ]);
+      try {
+        if (file.type.startsWith('image/')) {
+          const optimizedFile = await prepareImageForUpload(file);
+          const previewUrl = URL.createObjectURL(optimizedFile);
+          previewUrlsRef.current.add(previewUrl);
+          setAttachments((prev) => [
+            ...prev,
+            {
+              id: `${file.name}-${Date.now()}-${Math.random()}`,
+              name: optimizedFile.name,
+              mimeType: optimizedFile.type || file.type,
+              sizeBytes: optimizedFile.size,
+              file: optimizedFile,
+              previewUrl,
+            },
+          ]);
+          continue;
+        }
+
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = typeof reader.result === 'string' ? reader.result : '';
+            resolve(result.includes(',') ? result.split(',')[1] : result);
+          };
+          reader.onerror = () => reject(new Error(`No se pudo leer "${file.name}".`));
+          reader.readAsDataURL(file);
+        });
+
+        setAttachments((prev) => [
+          ...prev,
+          {
+            id: `${file.name}-${Date.now()}-${Math.random()}`,
+            name: file.name,
+            mimeType: file.type || 'application/octet-stream',
+            sizeBytes: file.size,
+            base64Data: base64,
+          },
+        ]);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : `No se pudo preparar "${file.name}".`);
+      }
     }
     e.target.value = '';
+  };
+
+  const handleRemoveAttachment = (attachment: PendingAttachment) => {
+    setAttachments((prev) => prev.filter((item) => item.id !== attachment.id));
+    if (attachment.previewUrl) {
+      URL.revokeObjectURL(attachment.previewUrl);
+      previewUrlsRef.current.delete(attachment.previewUrl);
+    }
+    if (attachment.storagePath) {
+      void deletePrivateStorageFile(attachment.storagePath).catch(() => {});
+    }
   };
 
   const handleToggleRecording = async () => {
@@ -331,18 +427,7 @@ export function InboxView({
     const trimmedText = inputText.trim();
     const trimmedLink = linkInput.trim() || undefined;
     const currentAtts = [...attachments];
-
-    const payload = {
-      conversationId: activeConvId,
-      projectId: selectedProjectId,
-      text: trimmedText,
-      linkUrl: trimmedLink,
-      attachments: currentAtts.map(({ name, mimeType, base64Data }) => ({
-        name,
-        mimeType,
-        base64Data,
-      })),
-    };
+    const preparedAtts = [...currentAtts];
 
     const optimisticId = -Date.now();
     const optimisticMsg: MessageItem = {
@@ -366,9 +451,7 @@ export function InboxView({
         mimeType: att.mimeType,
         aiSummary: null,
         detectedCategory: null,
-        previewDataUrl: att.mimeType.startsWith('image/')
-          ? `data:${att.mimeType};base64,${att.base64Data}`
-          : undefined,
+        previewUrl: att.previewUrl,
       })),
       createdAt: new Date().toISOString(),
     };
@@ -382,6 +465,25 @@ export function InboxView({
     setAttachments([]);
 
     try {
+      for (let index = 0; index < preparedAtts.length; index += 1) {
+        const attachment = preparedAtts[index];
+        if (!attachment.file) continue;
+        const stored = await uploadPrivateChatAttachment(attachment.file);
+        preparedAtts[index] = { ...attachment, ...stored, file: undefined };
+      }
+
+      const payload = {
+        conversationId: activeConvId,
+        projectId: selectedProjectId,
+        text: trimmedText,
+        linkUrl: trimmedLink,
+        attachments: preparedAtts.map(({ name, mimeType, base64Data, storagePath }) => ({
+          name,
+          mimeType,
+          ...(base64Data ? { base64Data } : {}),
+          ...(storagePath ? { storagePath } : {}),
+        })),
+      };
       const res = await apiRequest<{
         conversationId: number;
         userMessage: MessageItem;
@@ -397,6 +499,13 @@ export function InboxView({
         res.assistantMessage,
       ]);
 
+      for (const attachment of preparedAtts) {
+        if (attachment.previewUrl) {
+          URL.revokeObjectURL(attachment.previewUrl);
+          previewUrlsRef.current.delete(attachment.previewUrl);
+        }
+      }
+
       if (!activeConvId) {
         skipNextLoadConvIdRef.current = res.conversationId;
         setActiveConvId(res.conversationId);
@@ -406,6 +515,7 @@ export function InboxView({
       void onDataChanged();
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : 'Error al procesar con SILVV MEMORY.';
+      setAttachments(preparedAtts);
       setMessages((prev) =>
         prev.map((m) =>
           m.id === optimisticId
@@ -844,20 +954,20 @@ export function InboxView({
                         {m.attachments && m.attachments.length > 0 && (
                           <div className="mt-2.5 pt-2 border-t border-white/20 dark:border-white/10 space-y-1 text-xs opacity-90">
                             {m.attachments.some(
-                              (att) => att.mimeType?.startsWith('image/') && (att.fileId || att.previewDataUrl),
+                              (att) => att.mimeType?.startsWith('image/') && (att.fileId || att.previewDataUrl || att.previewUrl),
                             ) && (
                               <div className="mb-2 flex flex-wrap gap-2">
                                 {m.attachments
                                   .filter(
-                                    (att) => att.mimeType?.startsWith('image/') && (att.fileId || att.previewDataUrl),
+                                    (att) => att.mimeType?.startsWith('image/') && (att.fileId || att.previewDataUrl || att.previewUrl),
                                   )
                                   .map((att) => (
                                     <PrivateImagePreview
                                       key={att.id}
                                       fileId={att.fileId ?? undefined}
-                                      src={att.previewDataUrl}
+                                      src={att.previewUrl || att.previewDataUrl}
                                       alt={att.fileName || 'Imagen adjunta al mensaje'}
-                                      lazy={!att.previewDataUrl}
+                                      lazy={!att.previewDataUrl && !att.previewUrl}
                                       open={openImageAttachmentId === att.id}
                                       onOpenChange={(isOpen) =>
                                         setOpenImageAttachmentId(isOpen ? att.id : null)
@@ -1082,9 +1192,9 @@ export function InboxView({
                     key={att.id}
                     className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl glass-subtle text-zinc-800 dark:text-zinc-200"
                   >
-                    {att.mimeType.startsWith('image/') && (
+                    {att.mimeType.startsWith('image/') && att.previewUrl && (
                       <img
-                        src={`data:${att.mimeType};base64,${att.base64Data}`}
+                        src={att.previewUrl}
                         alt={`Vista previa de ${att.name}`}
                         className="h-12 w-12 rounded-lg object-cover"
                       />
@@ -1094,8 +1204,10 @@ export function InboxView({
                     </span>
                     <button
                       type="button"
-                      onClick={() => setAttachments((prev) => prev.filter((a) => a.id !== att.id))}
-                      className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 cursor-pointer"
+                      onClick={() => handleRemoveAttachment(att)}
+                      disabled={sending}
+                      aria-label={`Quitar ${att.name}`}
+                      className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 disabled:opacity-40 cursor-pointer"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -1133,13 +1245,16 @@ export function InboxView({
                 multiple
                 accept="image/*,application/pdf,audio/*,text/*,.md,.csv,.json"
                 onChange={handleFileChange}
+                disabled={sending}
                 className="hidden"
               />
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 title="Adjuntar múltiples archivos (imágenes, PDF, documentos o audios)"
-                className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl glass-subtle text-zinc-600 dark:text-zinc-300 hover:border-violet-500/40 transition-colors cursor-pointer shrink-0"
+                aria-label="Adjuntar archivos"
+                disabled={sending}
+                className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl glass-subtle text-zinc-600 dark:text-zinc-300 hover:border-violet-500/40 disabled:opacity-40 transition-colors cursor-pointer shrink-0"
               >
                 <Paperclip className="w-4 h-4" />
               </button>
