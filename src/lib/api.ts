@@ -198,6 +198,7 @@ export interface NoteOrganization {
   title: string;
   category: 'Estudios' | 'Vida diaria';
   subfolderName: string;
+  tags: string[];
 }
 
 export interface MemoryEventItem {

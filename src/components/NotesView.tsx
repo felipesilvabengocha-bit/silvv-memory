@@ -292,7 +292,6 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
   const foldersLoadedRef = useRef(false);
   const loadRequestIdRef = useRef(0);
   const smartRootFoldersPromiseRef = useRef<Promise<NoteFolderItem[]> | null>(null);
-  const draftTitleEditedRef = useRef(false);
 
   const loadAll = async (q = searchQuery) => {
     const requestId = ++loadRequestIdRef.current;
@@ -379,7 +378,6 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
       autoSaveTimerRef.current = null;
     }
     hydratingRef.current = true;
-    draftTitleEditedRef.current = false;
     if (activeNote) {
       setDraftTitle(activeNote.title);
       setDraftContent(activeNote.content);
@@ -478,7 +476,8 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
 
         foldersRef.current = folderPath.folders;
         setFolders(folderPath.folders);
-        if (!draftTitleEditedRef.current) setDraftTitle(organization.title);
+        setDraftTitle(organization.title);
+        setDraftTagsText(organization.tags.join(', '));
         setDraftFolderId(folderPath.folderId);
       } catch (err) {
         if (!cancelled) {
@@ -1280,7 +1279,7 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
                           ? 'La IA está organizando tu nota'
                           : !draftContent.trim()
                             ? 'Escribí para empezar'
-                            : 'Título sugerido por IA'}
+                            : 'Organización automática por IA'}
                       </span>
                       <span className="text-zinc-400 dark:text-zinc-500" aria-hidden="true">·</span>
                       <span className="text-zinc-500 dark:text-zinc-400">
@@ -1353,57 +1352,55 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 gap-3 rounded-2xl border border-zinc-200/70 bg-white/45 p-3 dark:border-white/10 dark:bg-white/[0.025] sm:grid-cols-12 sm:gap-3.5">
-                  <div className="sm:col-span-4">
-                    <label htmlFor="note-title" className="mb-1 block text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
-                      Título
-                    </label>
-                    <input
-                      id="note-title"
-                      type="text"
-                      value={draftTitle === 'Generando título…' ? '' : draftTitle}
-                      onChange={(e) => {
-                        draftTitleEditedRef.current = true;
-                        setDraftTitle(e.target.value);
-                      }}
-                      placeholder={draftTitle === 'Generando título…' ? 'Creando título…' : 'Nota nueva'}
-                      className="w-full rounded-xl border border-zinc-200/80 bg-white/70 px-3 py-2 text-base text-zinc-900 dark:border-white/10 dark:bg-black/30 dark:text-zinc-100 sm:text-sm"
-                    />
+                <section
+                  aria-label="Organización automática de la nota"
+                  className="space-y-2.5 rounded-2xl border border-zinc-200/70 bg-white/45 p-3 dark:border-white/10 dark:bg-white/[0.025]"
+                >
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-violet-500/10 text-violet-600 dark:text-violet-300">
+                      <Sparkles className="h-4 w-4" aria-hidden="true" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
+                        Título automático
+                      </p>
+                      <p aria-live="polite" className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                        {draftTitle === 'Generando título…'
+                          ? organizingNote
+                            ? 'Creando título…'
+                            : 'Nota nueva'
+                          : draftTitle || 'Nota nueva'}
+                      </p>
+                    </div>
+                    {organizingNote && (
+                      <span className="shrink-0 text-[10px] text-violet-600 dark:text-violet-300">
+                        Organizando…
+                      </span>
+                    )}
                   </div>
-                  <div className="sm:col-span-4">
-                    <label htmlFor="note-folder" className="mb-1 block text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
-                      Carpeta
-                    </label>
-                    <select
-                      id="note-folder"
-                      value={draftFolderId ?? ''}
-                      onChange={(e) =>
-                        setDraftFolderId(e.target.value ? Number(e.target.value) : null)
-                      }
-                      className="w-full rounded-xl border border-zinc-200/80 bg-white/70 px-3 py-2 text-base text-zinc-900 dark:border-white/10 dark:bg-black/30 dark:text-zinc-100 sm:text-sm"
-                    >
-                      <option value="">Sin carpeta (por clasificar)</option>
-                      {folders.map((folder) => (
-                        <option key={folder.id} value={folder.id}>
-                          {getFolderPathLabel(folders, folder.id)}
-                        </option>
+                  <div className="flex flex-wrap items-center gap-1.5 pl-10">
+                    <span className="inline-flex max-w-full items-center gap-1 rounded-lg bg-violet-500/10 px-2 py-1 text-[11px] font-medium text-violet-700 dark:text-violet-300">
+                      <Folder className="h-3 w-3 shrink-0" aria-hidden="true" />
+                      <span className="truncate">
+                        {draftFolderId === null
+                          ? 'Carpeta pendiente'
+                          : getFolderPathLabel(folders, draftFolderId) || 'Organizando carpeta…'}
+                      </span>
+                    </span>
+                    {draftTagsText
+                      .split(',')
+                      .map((tag) => tag.trim())
+                      .filter(Boolean)
+                      .map((tag) => (
+                        <span
+                          key={tag}
+                          className="rounded-lg border border-zinc-200/70 px-2 py-1 text-[11px] text-zinc-600 dark:border-white/10 dark:text-zinc-300"
+                        >
+                          #{tag}
+                        </span>
                       ))}
-                    </select>
                   </div>
-                  <div className="sm:col-span-4">
-                    <label htmlFor="note-tags" className="mb-1 block text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
-                      Etiquetas
-                    </label>
-                    <input
-                      id="note-tags"
-                      type="text"
-                      value={draftTagsText}
-                      onChange={(e) => setDraftTagsText(e.target.value)}
-                      placeholder="ideas, estudio, proyecto"
-                      className="w-full rounded-xl border border-zinc-200/80 bg-white/70 px-3 py-2 text-base text-zinc-900 dark:border-white/10 dark:bg-black/30 dark:text-zinc-100 sm:text-sm"
-                    />
-                  </div>
-                </div>
+                </section>
 
                 {previewMode ? (
                   <div className={`flex-1 ${editorOpen ? 'min-h-[140px]' : 'min-h-[260px]'} p-4 rounded-xl glass-subtle overflow-y-auto`}>
