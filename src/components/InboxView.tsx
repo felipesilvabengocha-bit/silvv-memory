@@ -143,7 +143,7 @@ export function InboxView({
   const [resolvingActionId, setResolvingActionId] = useState<number | null>(null);
   const [copiedMsgId, setCopiedMsgId] = useState<number | null>(null);
   const [editingMsgId, setEditingMsgId] = useState<number | null>(null);
-  const [openImageAttachmentId, setOpenImageAttachmentId] = useState<number | null>(null);
+  const [openImageAttachmentId, setOpenImageAttachmentId] = useState<string | null>(null);
   const [editMsgContent, setEditMsgContent] = useState('');
   const [regenerating, setRegenerating] = useState(false);
 
@@ -458,6 +458,7 @@ export function InboxView({
 
     setSending(true);
     setError(null);
+    setOpenImageAttachmentId(null);
     setMessages((prev) => [...prev, optimisticMsg]);
     setInputText('');
     setLinkInput('');
@@ -961,20 +962,23 @@ export function InboxView({
                                   .filter(
                                     (att) => att.mimeType?.startsWith('image/') && (att.fileId || att.previewDataUrl || att.previewUrl),
                                   )
-                                  .map((att) => (
-                                    <PrivateImagePreview
-                                      key={att.id}
-                                      fileId={att.fileId ?? undefined}
-                                      src={att.previewUrl || att.previewDataUrl}
-                                      alt={att.fileName || 'Imagen adjunta al mensaje'}
-                                      lazy={!att.previewDataUrl && !att.previewUrl}
-                                      open={openImageAttachmentId === att.id}
-                                      onOpenChange={(isOpen) =>
-                                        setOpenImageAttachmentId(isOpen ? att.id : null)
-                                      }
-                                      className="max-h-64 max-w-full rounded-xl object-contain bg-black/10"
-                                    />
-                                  ))}
+                                  .map((att) => {
+                                    const imagePreviewKey = `${m.id}:${att.id}`;
+                                    return (
+                                      <PrivateImagePreview
+                                        key={imagePreviewKey}
+                                        fileId={att.fileId ?? undefined}
+                                        src={att.previewUrl || att.previewDataUrl}
+                                        alt={att.fileName || 'Imagen adjunta al mensaje'}
+                                        lazy={!att.previewDataUrl && !att.previewUrl}
+                                        open={openImageAttachmentId === imagePreviewKey}
+                                        onOpenChange={(isOpen) =>
+                                          setOpenImageAttachmentId(isOpen ? imagePreviewKey : null)
+                                        }
+                                        className="max-h-64 max-w-full rounded-xl object-contain bg-black/10"
+                                      />
+                                    );
+                                  })}
                               </div>
                             )}
                             {m.attachments.map((att) => (
@@ -989,7 +993,7 @@ export function InboxView({
                                     type="button"
                                     onClick={() =>
                                       att.mimeType?.startsWith('image/')
-                                        ? setOpenImageAttachmentId(att.id)
+                                        ? setOpenImageAttachmentId(`${m.id}:${att.id}`)
                                         : handleDownloadAttachment(att.fileId!, att.fileName!)
                                     }
                                     aria-label={
