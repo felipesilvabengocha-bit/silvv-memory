@@ -1,18 +1,46 @@
 import { initializeApp } from 'firebase/app';
 import {
+  connectAuthEmulator,
   getAuth,
   GoogleAuthProvider,
   reauthenticateWithPopup,
+  signInWithCredential,
   signInWithPopup,
 } from 'firebase/auth';
-import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
+import {
+  connectFirestoreEmulator,
+  doc,
+  getDocFromServer,
+  getFirestore,
+} from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-const app = initializeApp(firebaseConfig);
+const TEST_FIREBASE_PROJECT_ID = 'demo-silvv-memory';
+export const isFirebaseEmulatorEnabled =
+  import.meta.env.DEV && import.meta.env.VITE_FIREBASE_EMULATORS === 'true';
+
+const activeFirebaseConfig = isFirebaseEmulatorEnabled
+  ? {
+      ...firebaseConfig,
+      apiKey: 'demo-api-key',
+      authDomain: `${TEST_FIREBASE_PROJECT_ID}.firebaseapp.com`,
+      projectId: TEST_FIREBASE_PROJECT_ID,
+      firestoreDatabaseId: undefined,
+    }
+  : firebaseConfig;
+
+const app = initializeApp(activeFirebaseConfig);
 export const auth = getAuth(app);
-export const db = firebaseConfig.firestoreDatabaseId
-  ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
-  : getFirestore(app);
+export const db = isFirebaseEmulatorEnabled
+  ? getFirestore(app)
+  : firebaseConfig.firestoreDatabaseId
+    ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
+    : getFirestore(app);
+
+if (isFirebaseEmulatorEnabled) {
+  connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+  connectFirestoreEmulator(db, '127.0.0.1', 8080);
+}
 
 export enum OperationType {
   CREATE = 'create',
@@ -104,6 +132,21 @@ export async function signInWithGoogleAndCaptureToken() {
     inMemoryGoogleAccessToken = credential.accessToken;
   }
   return result;
+}
+
+export async function signInWithEmulatorGoogleUser() {
+  if (!isFirebaseEmulatorEnabled) {
+    throw new Error('El acceso de prueba solo está disponible con los emuladores locales.');
+  }
+
+  const mockGoogleIdToken = JSON.stringify({
+    sub: 'silvv-memory-emulator-user',
+    email: 'silvv-test-user@example.test',
+    email_verified: true,
+    name: 'Usuario de prueba SILVV',
+  });
+
+  return signInWithCredential(auth, GoogleAuthProvider.credential(mockGoogleIdToken));
 }
 
 export async function authorizeGoogleCalendarPopup(): Promise<string | null> {
