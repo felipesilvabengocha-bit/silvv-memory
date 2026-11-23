@@ -1,7 +1,14 @@
 {
-  "firestore": {
-    "rules": "firestore.rules"
-  },
+  "firestore": [
+    {
+      "database": "(default)",
+      "rules": "firestore.rules"
+    },
+    {
+      "database": "ai-studio-aura-7ccaf593-3480-4506-871f-e0b6242d09c9",
+      "rules": "firestore.rules"
+    }
+  ],
   "emulators": {
     "auth": {
       "host": "127.0.0.1",
