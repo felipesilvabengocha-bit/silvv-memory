@@ -625,10 +625,10 @@ export function InboxView({
       {drawerOpen && (
         <>
           <div
-            className="fixed inset-0 z-40 bg-black/45 lg:hidden"
+            className="fixed inset-0 z-40 bg-black/45 lg:hidden animate-silvv-overlay-in"
             onClick={() => setDrawerOpen(false)}
           />
-          <aside className="fixed inset-y-0 left-0 z-50 w-72 lg:static lg:z-10 lg:w-80 glass-elevated lg:glass-panel border-r border-zinc-200/70 dark:border-white/10 p-4 flex flex-col gap-3 overflow-hidden shrink-0">
+          <aside className="fixed inset-y-0 left-0 z-50 w-72 lg:static lg:z-10 lg:w-80 glass-elevated lg:glass-panel border-r border-zinc-200/70 dark:border-white/10 p-4 flex flex-col gap-3 overflow-hidden shrink-0 animate-silvv-panel-in">
             <div className="flex items-center justify-between gap-2">
               <h2 className="font-display text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                 Conversaciones
@@ -689,7 +689,7 @@ export function InboxView({
                     }`}
                   >
                     {isRenaming ? (
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1 animate-silvv-in">
                         <input
                           type="text"
                           autoFocus
@@ -783,6 +783,7 @@ export function InboxView({
               type="button"
               onClick={() => setDrawerOpen((v) => !v)}
               title="Mostrar historial de conversaciones"
+              aria-expanded={drawerOpen}
               className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl glass-subtle text-xs font-medium text-zinc-700 dark:text-zinc-200 hover:border-violet-500/40 cursor-pointer whitespace-nowrap shrink-0"
             >
               <PanelLeft className="w-4 h-4" />
@@ -810,13 +811,14 @@ export function InboxView({
               type="button"
               onClick={() => setMenuOpen((v) => !v)}
               aria-label="Opciones de conversación"
+              aria-expanded={menuOpen}
               className="p-2 rounded-xl glass-subtle text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-zinc-50 cursor-pointer"
             >
               <MoreHorizontal className="w-4 h-4" />
             </button>
 
             {menuOpen && (
-              <div className="absolute right-0 top-11 z-40 w-64 glass-elevated rounded-2xl p-3 space-y-3 text-xs">
+              <div className="absolute right-0 top-11 z-40 w-64 glass-elevated rounded-2xl p-3 space-y-3 text-xs animate-silvv-popover-in">
                 <div className="space-y-1">
                   <label className="block text-[11px] text-zinc-500 dark:text-zinc-400">
                     Vincular a proyecto
@@ -875,7 +877,7 @@ export function InboxView({
         </div>
 
         {error && (
-          <div className="mx-4 sm:mx-8 mt-3 p-3 rounded-xl border border-red-300 dark:border-red-900/60 bg-red-50/80 dark:bg-red-950/30 text-xs text-red-700 dark:text-red-300 flex items-center justify-between gap-3 shrink-0">
+          <div className="mx-4 sm:mx-8 mt-3 p-3 rounded-xl border border-red-300 dark:border-red-900/60 bg-red-50/80 dark:bg-red-950/30 text-xs text-red-700 dark:text-red-300 flex items-center justify-between gap-3 shrink-0 animate-silvv-in">
             <span>{error}</span>
             <button type="button" onClick={() => setError(null)} className="cursor-pointer">
               <X className="w-3.5 h-3.5" />
@@ -909,7 +911,7 @@ export function InboxView({
                     key={m.id}
                     className={`flex flex-col ${
                       isUser ? 'items-end' : 'items-start'
-                    } space-y-2 animate-silvv-in`}
+                    } space-y-2 animate-silvv-message-in`}
                   >
                     {isEditing ? (
                       <div className="max-w-3xl w-full glass-panel border border-violet-500/60 rounded-2xl p-3.5 space-y-2">
@@ -1171,12 +1173,14 @@ export function InboxView({
             )}
 
             {(sending || regenerating) && (
-              <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
-                <RotateCw className="w-3.5 h-3.5 animate-spin text-violet-500 shrink-0" />
-                <span>
-                  SILVV MEMORY está analizando tu contexto
-                  {elapsedSeconds > 0 ? ` (${elapsedSeconds}s)` : '...'}
+              <div role="status" aria-live="polite" className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400 animate-silvv-message-in">
+                <span aria-hidden="true" className="inline-flex items-center gap-1 px-1">
+                  <span className="silvv-typing-dot h-1.5 w-1.5 rounded-full bg-violet-500" />
+                  <span className="silvv-typing-dot h-1.5 w-1.5 rounded-full bg-violet-500" />
+                  <span className="silvv-typing-dot h-1.5 w-1.5 rounded-full bg-violet-500" />
                 </span>
+                <span>SILVV MEMORY está analizando tu contexto</span>
+                {elapsedSeconds > 0 && <span aria-hidden="true">({elapsedSeconds}s)</span>}
               </div>
             )}
             <div ref={bottomRef} />
@@ -1186,7 +1190,7 @@ export function InboxView({
         {/* Sticky Docked Composer */}
         <form
           onSubmit={handleSend}
-          className={`px-4 sm:px-8 pt-3 ${mobileKeyboardOpen ? 'pb-3' : 'mb-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]'} border-t border-zinc-200/70 dark:border-white/10 glass-panel shrink-0 lg:mb-0`}
+          className={`silvv-compose-dock px-4 sm:px-8 pt-3 ${mobileKeyboardOpen ? 'pb-3' : 'mb-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]'} border-t border-zinc-200/70 dark:border-white/10 glass-panel shrink-0 lg:mb-0`}
         >
           <div className="max-w-4xl mx-auto space-y-2.5">
             {(attachments.length > 0 || showLinkInput) && (
@@ -1194,7 +1198,7 @@ export function InboxView({
                 {attachments.map((att) => (
                   <div
                     key={att.id}
-                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl glass-subtle text-zinc-800 dark:text-zinc-200"
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl glass-subtle text-zinc-800 dark:text-zinc-200 animate-silvv-message-in"
                   >
                     {att.mimeType.startsWith('image/') && att.previewUrl && (
                       <img

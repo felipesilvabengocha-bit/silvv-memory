@@ -331,3 +331,118 @@ select {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(113, 113, 122, 0.55);
 }
+
+@keyframes silvvPageEnterFromRight {
+  from { opacity: 0; transform: translate3d(14px, 0, 0) scale(0.995); }
+  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@keyframes silvvPageEnterFromLeft {
+  from { opacity: 0; transform: translate3d(-14px, 0, 0) scale(0.995); }
+  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@keyframes silvvPopoverEnter {
+  from { opacity: 0; transform: translate3d(0, -5px, 0) scale(0.98); }
+  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@keyframes silvvMessageEnter {
+  from { opacity: 0; transform: translate3d(0, 8px, 0) scale(0.99); }
+  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@keyframes silvvCalendarEnter {
+  from { opacity: 0; transform: translate3d(0, 5px, 0) scale(0.99); }
+  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@keyframes silvvTypingPulse {
+  0%, 60%, 100% { opacity: 0.35; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-2px); }
+}
+
+.silvv-view-transition[data-direction="forward"] {
+  animation-name: silvvPageEnterFromRight;
+}
+
+.silvv-view-transition[data-direction="backward"] {
+  animation-name: silvvPageEnterFromLeft;
+}
+
+.animate-silvv-popover-in {
+  animation: silvvPopoverEnter 220ms var(--silvv-motion-spring) both;
+  transform-origin: top right;
+}
+
+.animate-silvv-modal-in {
+  animation: silvvModalEnter 320ms var(--silvv-motion-spring) both;
+  transform-origin: center;
+}
+
+.animate-silvv-message-in,
+.animate-silvv-note-in {
+  animation: silvvMessageEnter 300ms var(--silvv-motion-spring) both;
+}
+
+.animate-silvv-calendar-in,
+.animate-silvv-calendar-day {
+  animation: silvvCalendarEnter 260ms var(--silvv-motion-spring) both;
+}
+
+.silvv-stagger-list > :nth-child(-n + 6) {
+  animation: silvvStaggerEnter 320ms var(--silvv-motion-spring) both;
+}
+.silvv-stagger-list > :nth-child(1) { animation-delay: 20ms; }
+.silvv-stagger-list > :nth-child(2) { animation-delay: 40ms; }
+.silvv-stagger-list > :nth-child(3) { animation-delay: 60ms; }
+.silvv-stagger-list > :nth-child(4) { animation-delay: 80ms; }
+.silvv-stagger-list > :nth-child(5) { animation-delay: 100ms; }
+.silvv-stagger-list > :nth-child(6) { animation-delay: 120ms; }
+
+.silvv-note-card,
+.silvv-calendar-event {
+  transition:
+    background-color var(--silvv-motion-fast) ease,
+    border-color var(--silvv-motion-fast) ease,
+    box-shadow var(--silvv-motion-fast) ease,
+    transform var(--silvv-motion-fast) var(--silvv-motion-ease);
+}
+
+.silvv-compose-dock {
+  transition:
+    background-color var(--silvv-motion-standard) ease,
+    box-shadow var(--silvv-motion-standard) var(--silvv-motion-ease),
+    border-color var(--silvv-motion-standard) ease;
+}
+.silvv-compose-dock:focus-within {
+  box-shadow: 0 -8px 28px -24px rgb(var(--silvv-accent) / 0.6);
+}
+
+.silvv-typing-dot {
+  animation: silvvTypingPulse 900ms ease-in-out infinite;
+}
+.silvv-typing-dot:nth-child(2) { animation-delay: 120ms; }
+.silvv-typing-dot:nth-child(3) { animation-delay: 240ms; }
+
+button:not(:disabled) svg,
+a[href] svg {
+  transition: transform var(--silvv-motion-fast) var(--silvv-motion-ease), color var(--silvv-motion-fast) ease;
+}
+
+button[aria-current="page"] {
+  position: relative;
+}
+
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  box-shadow: 0 0 0 3px rgb(var(--silvv-accent) / 0.12);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .silvv-note-card:hover,
+  .silvv-calendar-event:hover {
+    transform: translate3d(0, -1px, 0);
+  }
+}
