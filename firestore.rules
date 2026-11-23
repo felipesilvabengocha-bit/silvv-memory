@@ -30,6 +30,14 @@ service cloud.firestore {
       return val is string && val.size() >= minLen && val.size() <= maxLen;
     }
 
+    function isOptStringList(val, maxSize) {
+      return val == null || (val is list && val.size() <= maxSize && (val.size() == 0 || val[0] is string));
+    }
+
+    function hasMeaningfulNoteText(val) {
+      return val is string && val.matches('.*[\\p{L}\\p{N}].*[\\p{L}\\p{N}].*');
+    }
+
     function isOptStr(val, maxLen) {
       return val == null || (val is string && val.size() <= maxLen);
     }
@@ -111,6 +119,21 @@ service cloud.firestore {
         && isOptStr(data.get('deletedAt', null), 64);
     }
 
+    function isValidSmartFolder(data) {
+      return data.keys().hasAll(['id', 'userUid', 'name', 'slug', 'category', 'autoCreated', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'name', 'slug', 'category', 'description', 'autoCreated', 'deletedAt', 'createdAt', 'updatedAt'])
+        && isReqStr(data.id, 1, 100)
+        && isValidId(data.id)
+        && data.userUid == request.auth.uid
+        && isReqStr(data.name, 1, 80)
+        && isReqStr(data.slug, 1, 100)
+        && data.id == data.slug
+        && isReqStr(data.category, 1, 64)
+        && isOptStr(data.get('description', null), 500)
+        && data.autoCreated is bool
+        && isOptStr(data.get('deletedAt', null), 64);
+    }
+
     function isValidProject(data) {
       return data.keys().hasAll(['id', 'userUid', 'name', 'objectives', 'status', 'progressPercent', 'isPriority', 'autoCreated', 'lastActivityAt', 'createdAt', 'updatedAt'])
         && data.keys().hasOnly(['id', 'userUid', 'folderId', 'name', 'description', 'category', 'objectives', 'status', 'progressPercent', 'targetDate', 'isPriority', 'autoCreated', 'lastActivityAt', 'deletedAt', 'createdAt', 'updatedAt'])
@@ -187,7 +210,7 @@ service cloud.firestore {
 
     function isValidMemory(data) {
       return data.keys().hasAll(['id', 'userUid', 'memoryLayer', 'originKind', 'category', 'content', 'tags', 'entities', 'importance', 'confidence', 'isActive', 'sourceType', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['id', 'userUid', 'memoryLayer', 'originKind', 'category', 'title', 'content', 'tags', 'entities', 'importance', 'confidence', 'isActive', 'projectId', 'folderId', 'sourceType', 'sourceConversationId', 'sourceMessageId', 'sourceFileId', 'expiresAt', 'embedding', 'deletedAt', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'memoryLayer', 'originKind', 'category', 'title', 'content', 'tags', 'entities', 'importance', 'confidence', 'isActive', 'projectId', 'folderId', 'sourceType', 'sourceConversationId', 'sourceMessageId', 'sourceFileId', 'expiresAt', 'embedding', 'smartFolderIds', 'deletedAt', 'createdAt', 'updatedAt'])
         && isNum(data.id)
         && data.userUid == request.auth.uid
         && data.memoryLayer in ['episodic', 'semantic', 'project', 'temporal']
@@ -207,6 +230,7 @@ service cloud.firestore {
         && isOptNum(data.get('sourceMessageId', null))
         && isOptNum(data.get('sourceFileId', null))
         && isOptStr(data.get('expiresAt', null), 64)
+        && isOptStringList(data.get('smartFolderIds', null), 20)
         && (data.get('embedding', null) == null || (data.embedding is list && data.embedding.size() <= 4096))
         && isOptStr(data.get('deletedAt', null), 64);
     }
@@ -231,7 +255,7 @@ service cloud.firestore {
 
     function isValidCalendarEvent(data) {
       return data.keys().hasAll(['id', 'userUid', 'externalProvider', 'syncStatus', 'title', 'startAt', 'endAt', 'allDay', 'timezone', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['id', 'userUid', 'projectId', 'externalProvider', 'externalEventId', 'syncStatus', 'title', 'description', 'category', 'location', 'startAt', 'endAt', 'allDay', 'timezone', 'sourceMessageId', 'sourceFileId', 'linkedMemoryEventId', 'deletedAt', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'projectId', 'externalProvider', 'externalEventId', 'syncStatus', 'title', 'description', 'category', 'location', 'startAt', 'endAt', 'allDay', 'timezone', 'sourceMessageId', 'sourceFileId', 'linkedMemoryEventId', 'sourceMemoryId', 'sourceMemoryEventId', 'smartFolderIds', 'deletedAt', 'createdAt', 'updatedAt'])
         && isNum(data.id)
         && data.userUid == request.auth.uid
         && isOptNum(data.get('projectId', null))
@@ -249,6 +273,9 @@ service cloud.firestore {
         && isOptNum(data.get('sourceMessageId', null))
         && isOptNum(data.get('sourceFileId', null))
         && isOptNum(data.get('linkedMemoryEventId', null))
+        && isOptNum(data.get('sourceMemoryId', null))
+        && isOptNum(data.get('sourceMemoryEventId', null))
+        && isOptStringList(data.get('smartFolderIds', null), 20)
         && isOptStr(data.get('deletedAt', null), 64);
     }
 
@@ -265,13 +292,14 @@ service cloud.firestore {
 
     function isValidNote(data) {
       return data.keys().hasAll(['id', 'userUid', 'title', 'content', 'tags', 'isQuick', 'isPinned', 'isArchived', 'attachments', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['id', 'userUid', 'folderId', 'projectId', 'title', 'content', 'tags', 'isQuick', 'isPinned', 'isArchived', 'attachments', 'sourceConversationId', 'sourceMessageId', 'embedding', 'deletedAt', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'folderId', 'projectId', 'title', 'content', 'tags', 'isQuick', 'isPinned', 'isArchived', 'attachments', 'sourceConversationId', 'sourceMessageId', 'embedding', 'smartFolderIds', 'deletedAt', 'createdAt', 'updatedAt'])
         && isNum(data.id)
         && data.userUid == request.auth.uid
         && isOptNum(data.get('folderId', null))
         && isOptNum(data.get('projectId', null))
         && isReqStr(data.title, 1, 200)
         && isOptStr(data.content, 65000)
+        && (hasMeaningfulNoteText(data.title) || hasMeaningfulNoteText(data.content))
         && data.tags is list && data.tags.size() <= 20
         && data.isQuick is bool
         && data.isPinned is bool
@@ -279,13 +307,14 @@ service cloud.firestore {
         && data.attachments is list && data.attachments.size() <= 20
         && isOptNum(data.get('sourceConversationId', null))
         && isOptNum(data.get('sourceMessageId', null))
+        && isOptStringList(data.get('smartFolderIds', null), 20)
         && (data.get('embedding', null) == null || (data.embedding is list && data.embedding.size() <= 4096))
         && isOptStr(data.get('deletedAt', null), 64);
     }
 
     function isValidMemoryEvent(data) {
       return data.keys().hasAll(['id', 'userUid', 'title', 'description', 'datePrecision', 'category', 'people', 'relatedFileIds', 'relatedNoteIds', 'tags', 'importance', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['id', 'userUid', 'title', 'description', 'eventDate', 'datePrecision', 'dateLabel', 'category', 'people', 'projectId', 'sourceConversationId', 'sourceMessageId', 'sourceMessageText', 'relatedFileIds', 'relatedNoteIds', 'tags', 'importance', 'embedding', 'deletedAt', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'title', 'description', 'eventDate', 'datePrecision', 'dateLabel', 'category', 'people', 'projectId', 'sourceConversationId', 'sourceMessageId', 'sourceMessageText', 'relatedFileIds', 'relatedNoteIds', 'tags', 'importance', 'embedding', 'smartFolderIds', 'deletedAt', 'createdAt', 'updatedAt'])
         && isNum(data.id)
         && data.userUid == request.auth.uid
         && isReqStr(data.title, 1, 200)
@@ -303,13 +332,14 @@ service cloud.firestore {
         && data.relatedNoteIds is list && data.relatedNoteIds.size() <= 30
         && data.tags is list && data.tags.size() <= 20
         && isNum(data.importance) && data.importance >= 1 && data.importance <= 5
+        && isOptStringList(data.get('smartFolderIds', null), 20)
         && (data.get('embedding', null) == null || (data.embedding is list && data.embedding.size() <= 4096))
         && isOptStr(data.get('deletedAt', null), 64);
     }
 
     function isValidPersonEntity(data) {
       return data.keys().hasAll(['id', 'userUid', 'name', 'normalizedName', 'mentionCount', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['id', 'userUid', 'name', 'normalizedName', 'relationship', 'notes', 'mentionCount', 'lastMentionedAt', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userUid', 'name', 'normalizedName', 'relationship', 'notes', 'mentionCount', 'lastMentionedAt', 'photoUrl', 'smartFolderIds', 'deletedAt', 'createdAt', 'updatedAt'])
         && isNum(data.id)
         && data.userUid == request.auth.uid
         && isReqStr(data.name, 1, 120)
@@ -317,7 +347,10 @@ service cloud.firestore {
         && isOptStr(data.get('relationship', null), 120)
         && isOptStr(data.get('notes', null), 2000)
         && isNum(data.mentionCount) && data.mentionCount >= 0
-        && isOptStr(data.get('lastMentionedAt', null), 64);
+        && isOptStr(data.get('lastMentionedAt', null), 64)
+        && isOptStr(data.get('photoUrl', null), 1000)
+        && isOptStringList(data.get('smartFolderIds', null), 20)
+        && isOptStr(data.get('deletedAt', null), 64);
     }
 
     function isValidEventRelation(data) {
@@ -326,7 +359,7 @@ service cloud.firestore {
         && isNum(data.id)
         && data.userUid == request.auth.uid
         && isNum(data.sourceEventId)
-        && data.targetType in ['memory_event', 'person', 'project', 'note', 'file', 'calendar_event']
+        && data.targetType in ['memory', 'memory_event', 'person', 'project', 'note', 'file', 'calendar_event']
         && isNum(data.targetId)
         && isReqStr(data.targetLabel, 1, 200)
         && isReqStr(data.relationKind, 1, 64);
@@ -524,6 +557,19 @@ service cloud.firestore {
         allow delete: if isOwner(userId) && isValidId(folderId) && existing().userUid == request.auth.uid && !existing().isSystem;
       }
 
+      match /smartFolders/{folderId} {
+        allow get: if isOwner(userId) && isValidId(folderId) && (resource == null || existing().userUid == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(folderId) && isValidSmartFolder(incoming())
+          && incoming().id == folderId
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId) && isValidId(folderId) && isValidSmartFolder(incoming())
+          && incoming().id == existing().id && incoming().userUid == existing().userUid
+          && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'slug', 'category', 'description', 'autoCreated', 'deletedAt', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(folderId) && existing().userUid == request.auth.uid;
+      }
+
       match /projects/{projectId} {
         allow get: if isOwner(userId) && isValidId(projectId) && (resource == null || existing().userUid == request.auth.uid);
         allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
@@ -581,7 +627,7 @@ service cloud.firestore {
         allow update: if isOwner(userId) && isValidId(memId) && isValidMemory(incoming())
           && incoming().id == existing().id && incoming().userUid == existing().userUid
           && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
-          && incoming().diff(existing()).affectedKeys().hasOnly(['memoryLayer', 'originKind', 'category', 'title', 'content', 'tags', 'entities', 'importance', 'confidence', 'isActive', 'projectId', 'folderId', 'expiresAt', 'embedding', 'deletedAt', 'updatedAt']);
+          && incoming().diff(existing()).affectedKeys().hasOnly(['memoryLayer', 'originKind', 'category', 'title', 'content', 'tags', 'entities', 'importance', 'confidence', 'isActive', 'projectId', 'folderId', 'expiresAt', 'embedding', 'smartFolderIds', 'deletedAt', 'updatedAt']);
         allow delete: if isOwner(userId) && isValidId(memId) && existing().userUid == request.auth.uid;
       }
 
@@ -605,7 +651,7 @@ service cloud.firestore {
         allow update: if isOwner(userId) && isValidId(eventId) && isValidCalendarEvent(incoming())
           && incoming().id == existing().id && incoming().userUid == existing().userUid
           && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
-          && incoming().diff(existing()).affectedKeys().hasOnly(['projectId', 'externalProvider', 'externalEventId', 'syncStatus', 'title', 'description', 'category', 'location', 'startAt', 'endAt', 'allDay', 'timezone', 'linkedMemoryEventId', 'deletedAt', 'updatedAt']);
+          && incoming().diff(existing()).affectedKeys().hasOnly(['projectId', 'externalProvider', 'externalEventId', 'syncStatus', 'title', 'description', 'category', 'location', 'startAt', 'endAt', 'allDay', 'timezone', 'linkedMemoryEventId', 'sourceMemoryId', 'sourceMemoryEventId', 'smartFolderIds', 'deletedAt', 'updatedAt']);
         allow delete: if isOwner(userId) && isValidId(eventId) && existing().userUid == request.auth.uid;
       }
 
@@ -629,7 +675,7 @@ service cloud.firestore {
         allow update: if isOwner(userId) && isValidId(noteId) && isValidNote(incoming())
           && incoming().id == existing().id && incoming().userUid == existing().userUid
           && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
-          && incoming().diff(existing()).affectedKeys().hasOnly(['folderId', 'projectId', 'title', 'content', 'tags', 'isQuick', 'isPinned', 'isArchived', 'attachments', 'embedding', 'deletedAt', 'updatedAt']);
+          && incoming().diff(existing()).affectedKeys().hasOnly(['folderId', 'projectId', 'title', 'content', 'tags', 'isQuick', 'isPinned', 'isArchived', 'attachments', 'embedding', 'smartFolderIds', 'deletedAt', 'updatedAt']);
         allow delete: if isOwner(userId) && isValidId(noteId) && existing().userUid == request.auth.uid;
       }
 
@@ -641,7 +687,7 @@ service cloud.firestore {
         allow update: if isOwner(userId) && isValidId(mevId) && isValidMemoryEvent(incoming())
           && incoming().id == existing().id && incoming().userUid == existing().userUid
           && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
-          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'eventDate', 'datePrecision', 'dateLabel', 'category', 'people', 'projectId', 'relatedFileIds', 'relatedNoteIds', 'tags', 'importance', 'embedding', 'deletedAt', 'updatedAt']);
+          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'eventDate', 'datePrecision', 'dateLabel', 'category', 'people', 'projectId', 'relatedFileIds', 'relatedNoteIds', 'tags', 'importance', 'embedding', 'smartFolderIds', 'deletedAt', 'updatedAt']);
         allow delete: if isOwner(userId) && isValidId(mevId) && existing().userUid == request.auth.uid;
       }
 
@@ -653,7 +699,7 @@ service cloud.firestore {
         allow update: if isOwner(userId) && isValidId(personId) && isValidPersonEntity(incoming())
           && incoming().id == existing().id && incoming().userUid == existing().userUid
           && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
-          && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'normalizedName', 'relationship', 'notes', 'mentionCount', 'lastMentionedAt', 'updatedAt']);
+          && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'normalizedName', 'relationship', 'notes', 'mentionCount', 'lastMentionedAt', 'photoUrl', 'smartFolderIds', 'deletedAt', 'updatedAt']);
         allow delete: if isOwner(userId) && isValidId(personId) && existing().userUid == request.auth.uid;
       }
 

@@ -8,10 +8,12 @@ import {
   signInWithPopup,
 } from 'firebase/auth';
 import {
+  collection,
   connectFirestoreEmulator,
   doc,
   getDocFromServer,
   getFirestore,
+  onSnapshot,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -147,6 +149,37 @@ export async function signInWithEmulatorGoogleUser() {
   });
 
   return signInWithCredential(auth, GoogleAuthProvider.credential(mockGoogleIdToken));
+}
+
+export function subscribeToOrganizationChanges(
+  uid: string,
+  onChange: (collectionName: string) => void,
+): () => void {
+  const collectionNames = [
+    'notes',
+    'noteFolders',
+    'memories',
+    'memoryEvents',
+    'peopleEntities',
+    'eventRelations',
+    'calendarEvents',
+    'smartFolders',
+  ];
+  const initialized = new Set<string>();
+  const unsubscribeAll = collectionNames.map((collectionName) =>
+    onSnapshot(
+      collection(db, 'users', uid, collectionName),
+      (snapshot) => {
+        if (!initialized.has(collectionName)) {
+          initialized.add(collectionName);
+          return;
+        }
+        if (snapshot.docChanges().length > 0) onChange(collectionName);
+      },
+      () => {},
+    ),
+  );
+  return () => unsubscribeAll.forEach((unsubscribe) => unsubscribe());
 }
 
 export async function authorizeGoogleCalendarPopup(): Promise<string | null> {

@@ -9,8 +9,10 @@ import {
   setDoc,
   updateDoc,
   where,
+  writeBatch,
 } from 'firebase/firestore';
 import { auth, db, getGoogleAccessToken, handleFirestoreError, OperationType } from './firebase';
+import { getNoteValidationMessage, isValidNoteDraft } from './note-validation';
 import {
   DEFAULT_MEMORY_EVENT_CATEGORIES,
   type ActionLogItem,
@@ -44,6 +46,7 @@ import {
   type SearchHit,
   type SummaryRecordItem,
   type SummarySourceItem,
+  type SmartFolderItem,
   type TaskItem,
   type UserPreferences,
   type UserProfile,
@@ -365,6 +368,7 @@ type StoredMemory = MemoryItem & {
   embedding?: number[] | null;
   deletedAt?: string | null;
 };
+type StoredSmartFolder = SmartFolderItem & { deletedAt?: string | null };
 
 type StoredFolder = FolderItem & { deletedAt?: string | null };
 type StoredProject = ProjectItem & { folderId?: number | null; deletedAt?: string | null };
@@ -374,12 +378,14 @@ type StoredTask = TaskItem & { sourceMessageId?: number | null; sourceFileId?: n
 type StoredEvent = CalendarEventItem & {
   sourceMessageId?: number | null;
   sourceFileId?: number | null;
+  sourceMemoryEventId?: number | null;
   deletedAt?: string | null;
   createdAt?: string;
 };
 type StoredNoteFolder = NoteFolderItem & { deletedAt?: string | null };
 type StoredNote = NoteItem & { embedding?: number[] | null; deletedAt?: string | null };
 type StoredMemoryEvent = MemoryEventItem & { embedding?: number[] | null; deletedAt?: string | null };
+type StoredPerson = PersonEntityItem & { deletedAt?: string | null };
 type StoredSummaryRecord = SummaryRecordItem & { deletedAt?: string | null };
 type StoredAgent = AgentItem & { deletedAt?: string | null };
 type StoredAgentSource = AgentKnowledgeSource & {
@@ -389,6 +395,250 @@ type StoredAgentSource = AgentKnowledgeSource & {
 };
 type StoredAgentMemory = AgentMemory & { agentId: number };
 type StoredKnowledgeConv = KnowledgeConversation & { deletedAt?: string | null };
+
+function smartFolderSlug(name: string): string {
+  return slugify(name).slice(0, 100);
+}
+
+async function ensureSmartFolder(uid: string, name: string, category = name, stableId?: string): Promise<string> {
+  const cleanName = name.trim().split(' ').filter(Boolean).join(' ').slice(0, 80);
+  if (!cleanName) throw new Error('El nombre de la carpeta inteligente es obligatorio.');
+
+  const id = stableId ? smartFolderSlug(stableId) : smartFolderSlug(cleanName);
+  const existing = await getSubdoc<StoredSmartFolder>(uid, 'smartFolders', id);
+  if (existing && !existing.deletedAt) return id;
+
+  const nowIso = new Date().toISOString();
+  const folder: StoredSmartFolder = {
+    id,
+    name: cleanName,
+    slug: id,
+    category: category.trim().slice(0, 64) || cleanName,
+    description: null,
+    autoCreated: true,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    deletedAt: null,
+  };
+  try {
+    await createSubdoc(uid, 'smartFolders', id, folder as unknown as Record<string, unknown>);
+  } catch (error) {
+    const concurrentFolder = await getSubdoc<StoredSmartFolder>(uid, 'smartFolders', id);
+    if (!concurrentFolder || concurrentFolder.deletedAt) throw error;
+  }
+  return id;
+}
+
+function appendSmartFolderId(current: string[] | undefined, folderId: string): string[] {
+  return Array.from(new Set([...(current || []).filter((id) => typeof id === 'string'), folderId])).slice(0, 20);
+}
+
+async function softDeleteOrganizationRecord(
+  uid: string,
+  kind: 'memory' | 'note' | 'memory_event' | 'person' | 'calendar_event',
+  id: number,
+): Promise<void> {
+  const collectionByKind = {
+    memory: 'memories',
+    note: 'notes',
+    memory_event: 'memoryEvents',
+    person: 'peopleEntities',
+    calendar_event: 'calendarEvents',
+  } as const;
+  const collectionName = collectionByKind[kind];
+  const target = await getSubdoc<Record<string, unknown>>(uid, collectionName, String(id));
+  if (!target || target.deletedAt) throw new Error('El elemento ya no existe o fue eliminado.');
+
+  const [calendarEvents, memoryEvents, eventRelations, messages, notes, memories, smartFolders, daily, weekly, monthly] = await Promise.all([
+    kind === 'memory' || kind === 'memory_event' || kind === 'person'
+      ? listSubcollection<StoredEvent>(uid, 'calendarEvents')
+      : Promise.resolve([]),
+    kind === 'memory' || kind === 'note' || kind === 'memory_event' || kind === 'person'
+      ? listSubcollection<StoredMemoryEvent>(uid, 'memoryEvents')
+      : Promise.resolve([]),
+    kind === 'memory' || kind === 'memory_event' || kind === 'person' || kind === 'calendar_event'
+      ? listSubcollection<EventRelationItem>(uid, 'eventRelations')
+      : Promise.resolve([]),
+    kind === 'memory' || kind === 'note' ? listSubcollection<StoredMessage>(uid, 'messages') : Promise.resolve([]),
+    kind === 'note' || kind === 'person' ? listSubcollection<StoredNote>(uid, 'notes') : Promise.resolve([]),
+    kind === 'person' ? listSubcollection<StoredMemory>(uid, 'memories') : Promise.resolve([]),
+    kind === 'person' ? listSubcollection<StoredSmartFolder>(uid, 'smartFolders') : Promise.resolve([]),
+    kind === 'note' ? listSubcollection<StoredSummaryRecord>(uid, 'dailySummaries') : Promise.resolve([]),
+    kind === 'note' ? listSubcollection<StoredSummaryRecord>(uid, 'weeklySummaries') : Promise.resolve([]),
+    kind === 'note' ? listSubcollection<StoredSummaryRecord>(uid, 'monthlySummaries') : Promise.resolve([]),
+  ]);
+
+  const batch = writeBatch(db);
+  const nowIso = new Date().toISOString();
+  const plannedPatches = new Map<string, { subcollection: string; documentId: string; patch: Record<string, unknown> }>();
+  const addPatch = (subcollection: string, documentId: string, patch: Record<string, unknown>) => {
+    const key = `${subcollection}/${documentId}`;
+    const planned = plannedPatches.get(key);
+    plannedPatches.set(key, {
+      subcollection,
+      documentId,
+      patch: { ...planned?.patch, ...patch },
+    });
+  };
+  const addDelete = (subcollection: string, documentId: string) => {
+    batch.delete(doc(db, 'users', uid, subcollection, documentId));
+  };
+
+  addPatch(collectionName, String(id), { deletedAt: nowIso, updatedAt: serverTimestamp() });
+
+  if (kind === 'memory') {
+    for (const event of calendarEvents) {
+      if (!event.deletedAt && event.sourceMemoryId === id) {
+        addPatch('calendarEvents', String(event.id), { deletedAt: nowIso, updatedAt: serverTimestamp() });
+      }
+    }
+    const linkedMemoryEventIds = new Set(
+      eventRelations
+        .filter((relation) => relation.targetType === 'memory' && relation.targetId === id)
+        .map((relation) => relation.sourceEventId),
+    );
+    for (const memoryEvent of memoryEvents) {
+      if (memoryEvent.deletedAt || !linkedMemoryEventIds.has(memoryEvent.id)) continue;
+      const hasOtherMemoryLinks = eventRelations.some(
+        (relation) => relation.sourceEventId === memoryEvent.id &&
+          relation.targetType === 'memory' && relation.targetId !== id,
+      );
+      if (hasOtherMemoryLinks) {
+        for (const relation of eventRelations) {
+          if (relation.sourceEventId === memoryEvent.id && relation.targetType === 'memory' && relation.targetId === id) {
+            addDelete('eventRelations', String(relation.id));
+          }
+        }
+        continue;
+      }
+      addPatch('memoryEvents', String(memoryEvent.id), { deletedAt: nowIso, updatedAt: serverTimestamp() });
+      for (const calendarEvent of calendarEvents) {
+        if (calendarEvent.deletedAt) continue;
+        if (calendarEvent.sourceMemoryEventId === memoryEvent.id) {
+          addPatch('calendarEvents', String(calendarEvent.id), { deletedAt: nowIso, updatedAt: serverTimestamp() });
+        } else if (calendarEvent.linkedMemoryEventId === memoryEvent.id) {
+          addPatch('calendarEvents', String(calendarEvent.id), { linkedMemoryEventId: null, updatedAt: serverTimestamp() });
+        }
+      }
+      for (const relation of eventRelations) {
+        if (relation.sourceEventId === memoryEvent.id ||
+          (relation.targetType === 'memory' && relation.targetId === id && relation.sourceEventId === memoryEvent.id)) {
+          addDelete('eventRelations', String(relation.id));
+        }
+      }
+    }
+    for (const relation of eventRelations) {
+      if (relation.targetType === 'memory' && relation.targetId === id && !linkedMemoryEventIds.has(relation.sourceEventId)) {
+        addDelete('eventRelations', String(relation.id));
+      }
+    }
+    for (const message of messages) {
+      const savedMemories = message.metadata?.savedMemories;
+      if (!Array.isArray(savedMemories) || !savedMemories.some((item) => item.id === id)) continue;
+      addPatch('messages', String(message.id), {
+        metadata: { ...message.metadata, savedMemories: savedMemories.filter((item) => item.id !== id) },
+        updatedAt: serverTimestamp(),
+      });
+    }
+  }
+
+  if (kind === 'note') {
+    for (const event of memoryEvents) {
+      if (event.deletedAt || !event.relatedNoteIds?.includes(id)) continue;
+      addPatch('memoryEvents', String(event.id), {
+        relatedNoteIds: event.relatedNoteIds.filter((noteId) => noteId !== id),
+        updatedAt: serverTimestamp(),
+      });
+    }
+    for (const message of messages) {
+      const createdNotes = message.metadata?.createdNotes;
+      if (!Array.isArray(createdNotes) || !createdNotes.some((item) => item.id === id)) continue;
+      addPatch('messages', String(message.id), {
+        metadata: { ...message.metadata, createdNotes: createdNotes.filter((item) => item.id !== id) },
+        updatedAt: serverTimestamp(),
+      });
+    }
+    for (const summary of [...daily, ...weekly, ...monthly]) {
+      if (summary.savedNoteId === id) {
+        const subcollection = daily.includes(summary) ? 'dailySummaries' : weekly.includes(summary) ? 'weeklySummaries' : 'monthlySummaries';
+        addPatch(subcollection, String(summary.id), { savedNoteId: null, updatedAt: serverTimestamp() });
+      }
+    }
+  }
+
+  if (kind === 'memory_event') {
+    for (const event of calendarEvents) {
+      if (event.deletedAt || event.linkedMemoryEventId !== id) continue;
+      if (event.sourceMemoryEventId === id) {
+        addPatch('calendarEvents', String(event.id), { deletedAt: nowIso, updatedAt: serverTimestamp() });
+      } else {
+        addPatch('calendarEvents', String(event.id), { linkedMemoryEventId: null, updatedAt: serverTimestamp() });
+      }
+    }
+    for (const relation of eventRelations) {
+      if (relation.sourceEventId === id || (relation.targetType === 'memory_event' && relation.targetId === id)) {
+        addDelete('eventRelations', String(relation.id));
+      }
+    }
+  }
+
+  if (kind === 'person') {
+    const personRelations = eventRelations.filter((relation) => relation.targetType === 'person' && relation.targetId === id);
+    const relationEventIds = new Set(personRelations.map((relation) => relation.sourceEventId));
+    const person = target as unknown as StoredPerson;
+    const uniquePersonFolderId = smartFolderSlug(`person-${id}`);
+    const personFolderIds = (person.smartFolderIds || []).filter((folderId) => folderId === uniquePersonFolderId);
+    for (const folderId of personFolderIds) {
+      const folder = smartFolders.find((item) => item.id === folderId);
+      if (folder && !folder.deletedAt) {
+        addPatch('smartFolders', folderId, { deletedAt: nowIso, updatedAt: serverTimestamp() });
+      }
+    }
+    const removePersonFolders = (subcollection: string, items: Array<{ id: number; smartFolderIds?: string[]; deletedAt?: string | null }>) => {
+      for (const item of items) {
+        if (item.deletedAt || !item.smartFolderIds?.some((folderId) => personFolderIds.includes(folderId))) continue;
+        addPatch(subcollection, String(item.id), {
+          smartFolderIds: item.smartFolderIds.filter((folderId) => !personFolderIds.includes(folderId)),
+          updatedAt: serverTimestamp(),
+        });
+      }
+    };
+    removePersonFolders('notes', notes);
+    removePersonFolders('memories', memories);
+    removePersonFolders('memoryEvents', memoryEvents);
+    removePersonFolders('calendarEvents', calendarEvents);
+    for (const event of memoryEvents) {
+      if (event.deletedAt || !relationEventIds.has(event.id)) continue;
+      const sameLabelStillLinked = eventRelations.some(
+        (relation) =>
+          relation.sourceEventId === event.id &&
+          relation.targetType === 'person' &&
+          relation.targetId !== id &&
+          normalizeName(relation.targetLabel) === normalizeName(person.name),
+      );
+      if (!sameLabelStillLinked && event.people?.some((name) => normalizeName(name) === person.normalizedName)) {
+        addPatch('memoryEvents', String(event.id), {
+          people: event.people.filter((name) => normalizeName(name) !== person.normalizedName),
+          updatedAt: serverTimestamp(),
+        });
+      }
+    }
+    for (const relation of personRelations) addDelete('eventRelations', String(relation.id));
+  }
+
+  if (kind === 'calendar_event') {
+    for (const relation of eventRelations) {
+      if (relation.targetType === 'calendar_event' && relation.targetId === id) {
+        addDelete('eventRelations', String(relation.id));
+      }
+    }
+  }
+
+  for (const { subcollection, documentId, patch } of plannedPatches.values()) {
+    batch.update(doc(db, 'users', uid, subcollection, documentId), patch);
+  }
+  await batch.commit();
+}
 
 const bootstrapDone = new Map<string, Promise<void>>();
 
@@ -720,6 +970,7 @@ interface GeminiChatAnalysis {
   classifications: string[];
   detectedCategory: string;
   classificationConfidence: number;
+  personMatches: Array<{ name: string; personId: number }>;
   suggestedParentFolderName: string;
   suggestedFolderName: string;
   extractedSummary: string;
@@ -753,6 +1004,8 @@ interface GeminiChatAnalysis {
     endAtIso: string;
     allDay: boolean;
     ambiguousReason: string;
+    relatedMemoryId?: number;
+    relatedMemoryIndex?: number;
   }>;
   proposedMemoryEvents: Array<{
     title: string;
@@ -765,6 +1018,8 @@ interface GeminiChatAnalysis {
     projectName: string;
     tags: string[];
     importance: number;
+    relatedMemoryId?: number;
+    relatedMemoryIndex?: number;
   }>;
   proposedNoteAction: {
     action: 'none' | 'create' | 'propose_edit';
@@ -822,7 +1077,7 @@ async function processChatTurn(params: {
     listSubcollection<StoredNote>(uid, 'notes'),
     listSubcollection<StoredNoteFolder>(uid, 'noteFolders'),
     listSubcollection<StoredMemoryEvent>(uid, 'memoryEvents'),
-    listSubcollection<PersonEntityItem>(uid, 'peopleEntities'),
+    listSubcollection<StoredPerson>(uid, 'peopleEntities'),
   ]);
 
   const activeProjects = allProjects.filter((p) => !p.deletedAt);
@@ -831,6 +1086,7 @@ async function processChatTurn(params: {
   const activeNotes = allNotes.filter((n) => !n.deletedAt && !n.isArchived);
   const activeNoteFolders = allNoteFolders.filter((nf) => !nf.deletedAt);
   const activeMemoryEvents = allMemoryEvents.filter((me) => !me.deletedAt);
+  const activePeople = allPeople.filter((person) => !person.deletedAt);
   const pendingTasksList = allTasks.filter((t) => !t.deletedAt && t.status === 'pending');
   const upcomingEventsList = allEvents.filter((e) => !e.deletedAt && e.endAt >= nowIso);
 
@@ -889,6 +1145,7 @@ async function processChatTurn(params: {
     .sort((a, b) => b.score - a.score)
     .slice(0, 12)
     .map(({ m }) => ({
+      id: m.id,
       layer: m.memoryLayer,
       originKind: m.originKind,
       category: m.category,
@@ -966,6 +1223,13 @@ async function processChatTurn(params: {
       relevantMemories: rankedMemories,
       relevantNotes: rankedNotes,
       relevantMemoryEvents: rankedMemoryEvents,
+      knownPeople: activePeople.slice(0, 40).map((person) => ({
+        id: person.id,
+        name: person.name,
+        relationship: person.relationship,
+        notes: person.notes,
+        lastMentionedAt: person.lastMentionedAt,
+      })),
       availableCategories,
       pendingTasks: pendingTasksList.slice(0, 15).map((t) => ({
         id: t.id,
@@ -996,6 +1260,62 @@ async function processChatTurn(params: {
   let fileStatus: 'analyzed' | 'organized' | 'pending_confirmation' = 'analyzed';
 
   const writePromises: Array<Promise<unknown>> = [];
+  const personCache = new Map<string, StoredPerson>();
+  const personMatchIdByName = new Map<string, number>();
+  const personFolderIdByProfileId = new Map<number, string>();
+  const updatedPersonIds = new Set<number>();
+  for (const match of analysis.personMatches || []) {
+    const normalizedName = normalizeName(match.name);
+    if (!normalizedName) continue;
+    const wasCached = personCache.has(normalizedName);
+    const existingPerson = Number.isSafeInteger(match.personId) && match.personId > 0
+      ? activePeople.find((person) => person.id === match.personId && normalizeName(person.name) === normalizedName)
+      : undefined;
+    let person = existingPerson || personCache.get(normalizedName);
+    if (!person) {
+      const personId = nextNumericId();
+      person = {
+        id: personId,
+        name: match.name.trim().slice(0, 120),
+        normalizedName: normalizedName.slice(0, 120),
+        relationship: null,
+        notes: null,
+        mentionCount: 1,
+        lastMentionedAt: nowIso,
+        smartFolderIds: [],
+        createdAt: nowIso,
+      };
+    }
+    const personFolderId = await ensureSmartFolder(uid, person.name, 'Personas', `person-${person.id}`);
+    person.smartFolderIds = appendSmartFolderId(person.smartFolderIds, personFolderId);
+    personCache.set(normalizedName, person);
+    personMatchIdByName.set(normalizedName, person.id);
+    personFolderIdByProfileId.set(person.id, personFolderId);
+
+    if (existingPerson && !updatedPersonIds.has(existingPerson.id)) {
+      existingPerson.mentionCount += 1;
+      existingPerson.lastMentionedAt = nowIso;
+      existingPerson.smartFolderIds = person.smartFolderIds;
+      updatedPersonIds.add(existingPerson.id);
+      writePromises.push(updateSubdoc(uid, 'peopleEntities', String(existingPerson.id), {
+        mentionCount: existingPerson.mentionCount,
+        lastMentionedAt: nowIso,
+        smartFolderIds: existingPerson.smartFolderIds,
+      }));
+    } else if (!existingPerson && !wasCached) {
+      writePromises.push(createSubdoc(uid, 'peopleEntities', String(person.id), {
+        id: person.id,
+        name: person.name,
+        normalizedName: person.normalizedName,
+        relationship: person.relationship,
+        notes: person.notes,
+        mentionCount: person.mentionCount,
+        lastMentionedAt: person.lastMentionedAt,
+        smartFolderIds: person.smartFolderIds,
+      }));
+      updatedPersonIds.add(person.id);
+    }
+  }
 
   if (storedAttachments.length > 0) {
     const parentName = analysis.suggestedParentFolderName?.trim();
@@ -1109,6 +1429,8 @@ async function processChatTurn(params: {
 
   // Save multi-layer memories
   const savedMemories: NonNullable<MessageItem['metadata']['savedMemories']> = [];
+  const savedMemoryIdsByAnalysisIndex = new Map<number, number>();
+  const savedMemoryFoldersByAnalysisIndex = new Map<number, string[]>();
   for (let i = 0; i < analysis.memoriesToSave.length; i++) {
     const mem = analysis.memoriesToSave[i];
     if (!mem.content || disabledCats.has((mem.category || '').toLowerCase())) continue;
@@ -1140,6 +1462,18 @@ async function processChatTurn(params: {
     const cleanCategory = (mem.category || analysis.detectedCategory || 'General').slice(0, 64);
     const cleanTitle = mem.title ? mem.title.slice(0, 200) : null;
     const emb = memoryEmbeddings[i] ?? null;
+    const entityNames = Array.isArray(mem.entities)
+      ? Array.from(new Set(mem.entities.map((entity) => String(entity).trim()).filter(Boolean))).slice(0, 12)
+      : [];
+    const memorySmartFolderSet = new Set<string>([
+      await ensureSmartFolder(uid, cleanCategory, cleanCategory),
+    ]);
+    for (const entityName of entityNames) {
+      const personId = personMatchIdByName.get(normalizeName(entityName));
+      const personFolderId = personId ? personFolderIdByProfileId.get(personId) : undefined;
+      memorySmartFolderSet.add(personFolderId || await ensureSmartFolder(uid, entityName, cleanCategory));
+    }
+    const memorySmartFolderIds = Array.from(memorySmartFolderSet).slice(0, 20);
 
     writePromises.push(
       createSubdoc(uid, 'memories', String(memId), {
@@ -1156,6 +1490,7 @@ async function processChatTurn(params: {
         isActive: true,
         projectId,
         folderId: assignedFolderId,
+        smartFolderIds: memorySmartFolderIds.slice(0, 20),
         sourceType:
           storedAttachments.length > 0
             ? storedAttachments[0].fileKind
@@ -1171,6 +1506,8 @@ async function processChatTurn(params: {
       }),
     );
 
+    savedMemoryIdsByAnalysisIndex.set(i, memId);
+    savedMemoryFoldersByAnalysisIndex.set(i, memorySmartFolderIds);
     savedMemories.push({
       id: memId,
       title: cleanTitle,
@@ -1188,7 +1525,10 @@ async function processChatTurn(params: {
   // Process Note Action (Create automatically, Propose Edit with explicit confirmation)
   if (analysis.proposedNoteAction) {
     const na = analysis.proposedNoteAction;
-    if (na.action === 'create' && (na.title || na.content)) {
+    if (
+      na.action === 'create' &&
+      isValidNoteDraft((na.title || '').trim(), (na.content || userText || '').trim())
+    ) {
       const noteTitle = (na.title || 'Nota sin título').trim().slice(0, 200);
       const noteContent = (na.content || userText || '').trim().slice(0, 65000);
       const duplicateNote = activeNotes.find(
@@ -1240,6 +1580,7 @@ async function processChatTurn(params: {
             targetNoteFolderId = subfolderId;
           }
         }
+        const sharedFolderId = await ensureSmartFolder(uid, subfolderName || folderCategory, folderCategory);
         const noteId = nextNumericId();
         writePromises.push(
           createSubdoc(uid, 'notes', String(noteId), {
@@ -1255,6 +1596,7 @@ async function processChatTurn(params: {
             attachments: [],
             sourceConversationId: convId,
             sourceMessageId: userMsgId,
+            smartFolderIds: [sharedFolderId],
             embedding: noteEmbedding ? noteEmbedding.slice(0, 4096) : null,
             deletedAt: null,
           }),
@@ -1299,10 +1641,9 @@ async function processChatTurn(params: {
   }
 
   // Process Agenda Memoria Events automatically (NO confirmation interruption!)
-  const personCache = new Map<string, PersonEntityItem>();
-  for (const p of allPeople) {
-    personCache.set(p.normalizedName, p);
-  }
+  const existingEventRelations = activePeople.length > 0
+    ? await listSubcollection<EventRelationItem>(uid, 'eventRelations')
+    : [];
 
   for (let i = 0; i < (analysis.proposedMemoryEvents || []).length; i++) {
     const mev = analysis.proposedMemoryEvents[i];
@@ -1331,6 +1672,67 @@ async function processChatTurn(params: {
     const peopleList = Array.isArray(mev.people)
       ? Array.from(new Set(mev.people.map((x) => String(x).trim()).filter(Boolean))).slice(0, 30)
       : [];
+    const memoryEventCategory = (mev.category || 'Vida personal').slice(0, 64);
+    const smartFolderId = await ensureSmartFolder(uid, memoryEventCategory, memoryEventCategory);
+    const personFolderIds: string[] = [];
+    for (const personName of peopleList) {
+      const normalizedName = normalizeName(personName);
+      let person = personCache.get(normalizedName);
+      if (!person) {
+        const personId = nextNumericId();
+        const personFolderId = await ensureSmartFolder(uid, personName, 'Personas', `person-${personId}`);
+        person = {
+          id: personId,
+          name: personName.slice(0, 120),
+          normalizedName: normalizedName.slice(0, 120),
+          relationship: null,
+          notes: null,
+          mentionCount: 1,
+          lastMentionedAt: evDate || nowIso,
+          smartFolderIds: [smartFolderId, personFolderId],
+          createdAt: nowIso,
+        };
+        personCache.set(normalizedName, person);
+        personMatchIdByName.set(normalizedName, personId);
+        personFolderIdByProfileId.set(personId, personFolderId);
+        updatedPersonIds.add(personId);
+        writePromises.push(createSubdoc(uid, 'peopleEntities', String(personId), {
+          id: personId,
+          name: person.name,
+          normalizedName: person.normalizedName,
+          relationship: null,
+          notes: null,
+          mentionCount: 1,
+          lastMentionedAt: person.lastMentionedAt,
+          smartFolderIds: person.smartFolderIds,
+        }));
+      }
+      const personFolderId = personFolderIdByProfileId.get(person.id) ||
+        await ensureSmartFolder(uid, person.name, 'Personas', `person-${person.id}`);
+      personFolderIdByProfileId.set(person.id, personFolderId);
+      personFolderIds.push(personFolderId);
+    }
+    const inferredMemoryIndex = analysis.memoriesToSave.length === 1 && analysis.proposedMemoryEvents.length === 1
+      ? 0
+      : undefined;
+    const explicitMemoryId = typeof mev.relatedMemoryId === 'number' && Number.isSafeInteger(mev.relatedMemoryId)
+      ? activeMemories.find((memory) => memory.id === mev.relatedMemoryId)?.id
+      : undefined;
+    const relatedMemoryIndex = typeof mev.relatedMemoryIndex === 'number' && Number.isSafeInteger(mev.relatedMemoryIndex)
+      ? mev.relatedMemoryIndex
+      : explicitMemoryId ? undefined : inferredMemoryIndex;
+    const relatedMemoryId = relatedMemoryIndex !== undefined
+      ? savedMemoryIdsByAnalysisIndex.get(relatedMemoryIndex)
+      : explicitMemoryId;
+    const relatedMemoryFolders = relatedMemoryId
+      ? activeMemories.find((memory) => memory.id === relatedMemoryId)?.smartFolderIds ||
+        (relatedMemoryIndex !== undefined ? savedMemoryFoldersByAnalysisIndex.get(relatedMemoryIndex) : []) || []
+      : [];
+    const eventSmartFolderIds = Array.from(new Set([
+      smartFolderId,
+      ...personFolderIds,
+      ...relatedMemoryFolders,
+    ])).slice(0, 20);
 
     const mevId = nextNumericId();
     const emb = memoryEventEmbeddings?.[i] ?? null;
@@ -1343,7 +1745,8 @@ async function processChatTurn(params: {
         eventDate: evDate,
         datePrecision,
         dateLabel: mev.dateLabel ? mev.dateLabel.slice(0, 120) : evDate ? evDate.slice(0, 10) : 'Sin fecha precisa',
-        category: (mev.category || 'Vida personal').slice(0, 64),
+        category: memoryEventCategory,
+        smartFolderIds: eventSmartFolderIds,
         people: peopleList,
         projectId: matchedProj?.id ?? projectId,
         sourceConversationId: convId,
@@ -1357,6 +1760,21 @@ async function processChatTurn(params: {
         deletedAt: null,
       }),
     );
+    if (relatedMemoryId) {
+      const relationId = nextNumericId();
+      const relatedMemory = activeMemories.find((memory) => memory.id === relatedMemoryId);
+      const relatedMemoryAnalysis = analysis.memoriesToSave.find(
+        (_memory, memoryIndex) => savedMemoryIdsByAnalysisIndex.get(memoryIndex) === relatedMemoryId,
+      );
+      writePromises.push(createSubdoc(uid, 'eventRelations', String(relationId), {
+        id: relationId,
+        sourceEventId: mevId,
+        targetType: 'memory',
+        targetId: relatedMemoryId,
+        targetLabel: (relatedMemory?.title || relatedMemory?.category || relatedMemoryAnalysis?.title || 'Memoria relacionada').slice(0, 200),
+        relationKind: 'describes_memory',
+      }));
+    }
 
     createdMemoryEvents.push({
       id: mevId,
@@ -1366,44 +1784,12 @@ async function processChatTurn(params: {
       people: peopleList,
     });
 
-    // Upsert tracked people + eventRelations
+    // Relate this event to the profile selected by AI identity resolution, never name equality alone.
     for (const pName of peopleList) {
       const norm = normalizeName(pName);
       if (!norm) continue;
-      let person = personCache.get(norm);
-      if (!person) {
-        const pId = nextNumericId();
-        person = {
-          id: pId,
-          name: pName.slice(0, 120),
-          normalizedName: norm.slice(0, 120),
-          relationship: null,
-          notes: null,
-          mentionCount: 1,
-          lastMentionedAt: evDate || nowIso,
-          createdAt: nowIso,
-        };
-        personCache.set(norm, person);
-        writePromises.push(
-          createSubdoc(uid, 'peopleEntities', String(pId), {
-            id: pId,
-            name: person.name,
-            normalizedName: person.normalizedName,
-            relationship: null,
-            notes: null,
-            mentionCount: 1,
-            lastMentionedAt: person.lastMentionedAt,
-          }),
-        );
-      } else {
-        person.mentionCount += 1;
-        writePromises.push(
-          updateSubdoc(uid, 'peopleEntities', String(person.id), {
-            mentionCount: person.mentionCount,
-            lastMentionedAt: evDate || nowIso,
-          }),
-        );
-      }
+      const person = personCache.get(norm);
+      if (!person) continue;
 
       const relId = nextNumericId();
       writePromises.push(
@@ -1418,9 +1804,12 @@ async function processChatTurn(params: {
       );
 
       // Link to most recent prior memory event involving the same person
-      const prevPersonEvent = activeMemoryEvents.find((oldEv) =>
-        oldEv.people.some((op) => normalizeName(op) === norm),
+      const priorPersonRelation = existingEventRelations.find(
+        (relation) => relation.targetType === 'person' && relation.targetId === person.id,
       );
+      const prevPersonEvent = priorPersonRelation
+        ? activeMemoryEvents.find((oldEvent) => oldEvent.id === priorPersonRelation.sourceEventId)
+        : undefined;
       if (prevPersonEvent) {
         const relEvId = nextNumericId();
         writePromises.push(
@@ -1554,8 +1943,23 @@ async function processChatTurn(params: {
         (autonomyLevel === 'balanced' && Boolean(preferences.autoCreateCalendarEvents))) &&
       !overlapping &&
       !isAmbiguous;
+    const linkedMemory = typeof ev.relatedMemoryId === 'number'
+      ? activeMemories.find((memory) => memory.id === ev.relatedMemoryId)
+      : undefined;
+    const sameTurnMemoryId = typeof ev.relatedMemoryIndex === 'number'
+      ? savedMemoryIdsByAnalysisIndex.get(ev.relatedMemoryIndex)
+      : undefined;
+    const sourceMemoryId = linkedMemory?.id ?? sameTurnMemoryId ?? null;
+    const linkedMemorySmartFolders = linkedMemory?.smartFolderIds || (
+      typeof ev.relatedMemoryIndex === 'number'
+        ? savedMemoryFoldersByAnalysisIndex.get(ev.relatedMemoryIndex) || []
+        : []
+    );
 
     if (autoCreateEvent) {
+      const eventCategory = (ev.category || analysis.detectedCategory || 'Agenda').slice(0, 64);
+      const eventSmartFolderId = await ensureSmartFolder(uid, eventCategory, eventCategory);
+      const eventSmartFolderIds = Array.from(new Set([eventSmartFolderId, ...linkedMemorySmartFolders])).slice(0, 20);
       const eventId = nextNumericId();
       writePromises.push(
         createSubdoc(uid, 'calendarEvents', String(eventId), {
@@ -1566,7 +1970,10 @@ async function processChatTurn(params: {
           syncStatus: 'local_only',
           title: ev.title.slice(0, 180),
           description: ev.description ? ev.description.slice(0, 2000) : null,
-          category: (ev.category || analysis.detectedCategory || 'Agenda').slice(0, 64),
+          category: eventCategory,
+          smartFolderIds: eventSmartFolderIds,
+          sourceMemoryId,
+          sourceMemoryEventId: null,
           location: ev.location ? ev.location.slice(0, 240) : null,
           startAt: startIso,
           endAt: endIso,
@@ -1614,6 +2021,7 @@ async function processChatTurn(params: {
             conflictWith: overlapping ? overlapping.title : null,
             sourceMessageId: userMsgId,
             sourceFileId: uploadedFileIds[0] ?? null,
+            sourceMemoryId,
           },
           outputPayload: {},
           errorMessage: null,
@@ -1996,7 +2404,7 @@ export async function dispatchSilvvRequest<T>(rawPath: string, options: RequestI
         listSubcollection<StoredNoteFolder>(uid, 'noteFolders'),
         listSubcollection<StoredNote>(uid, 'notes'),
         listSubcollection<StoredMemoryEvent>(uid, 'memoryEvents'),
-        listSubcollection<PersonEntityItem>(uid, 'peopleEntities'),
+        listSubcollection<StoredPerson>(uid, 'peopleEntities'),
         listSubcollection<StoredSummaryRecord>(uid, 'dailySummaries'),
         listSubcollection<StoredSummaryRecord>(uid, 'weeklySummaries'),
         listSubcollection<StoredSummaryRecord>(uid, 'monthlySummaries'),
@@ -2031,6 +2439,106 @@ export async function dispatchSilvvRequest<T>(rawPath: string, options: RequestI
 
   if (pathname === '/api/ai/note-organization' && method === 'POST') {
     return (await callServerEndpoint('/api/ai/note-organization', 'POST', body)) as T;
+  }
+
+  if (pathname === '/api/organization' && method === 'GET') {
+    const [initialFolders, noteFolders, notes, memories, people, memoryEvents, calendarEvents, eventRelations] = await Promise.all([
+      listSubcollection<StoredSmartFolder>(uid, 'smartFolders'),
+      listSubcollection<StoredNoteFolder>(uid, 'noteFolders'),
+      listSubcollection<StoredNote>(uid, 'notes'),
+      listSubcollection<StoredMemory>(uid, 'memories'),
+      listSubcollection<StoredPerson>(uid, 'peopleEntities'),
+      listSubcollection<StoredMemoryEvent>(uid, 'memoryEvents'),
+      listSubcollection<StoredEvent>(uid, 'calendarEvents'),
+      listSubcollection<EventRelationItem>(uid, 'eventRelations'),
+    ]);
+    let foldersChanged = false;
+    const personFolderIds = new Map<number, string>();
+    for (const person of people.filter((item) => !item.deletedAt)) {
+      const folderId = await ensureSmartFolder(uid, person.name, 'Personas', `person-${person.id}`);
+      personFolderIds.set(person.id, folderId);
+      if (!person.smartFolderIds?.includes(folderId)) {
+        person.smartFolderIds = appendSmartFolderId(person.smartFolderIds, folderId);
+        await updateSubdoc(uid, 'peopleEntities', String(person.id), { smartFolderIds: person.smartFolderIds });
+        foldersChanged = true;
+      }
+    }
+    for (const note of notes.filter((item) => !item.deletedAt && !item.smartFolderIds?.length)) {
+      const legacyFolder = noteFolders.find((folder) => folder.id === note.folderId && !folder.deletedAt);
+      const folderName = legacyFolder?.name || 'Vida diaria';
+      const folderId = await ensureSmartFolder(uid, folderName, folderName);
+      note.smartFolderIds = [folderId];
+      await updateSubdoc(uid, 'notes', String(note.id), { smartFolderIds: note.smartFolderIds });
+      foldersChanged = true;
+    }
+    for (const memory of memories.filter((item) => !item.deletedAt && !item.smartFolderIds?.length)) {
+      const category = memory.category?.trim() || 'Vida diaria';
+      const folderId = await ensureSmartFolder(uid, category, category);
+      memory.smartFolderIds = [folderId];
+      await updateSubdoc(uid, 'memories', String(memory.id), { smartFolderIds: memory.smartFolderIds });
+      foldersChanged = true;
+    }
+    for (const event of memoryEvents.filter((item) => !item.deletedAt && !item.smartFolderIds?.length)) {
+      const category = event.category?.trim() || 'Vida personal';
+      const linkedFolders = [await ensureSmartFolder(uid, category, category)];
+      for (const relation of eventRelations) {
+        if (relation.sourceEventId === event.id && relation.targetType === 'person') {
+          const personFolderId = personFolderIds.get(relation.targetId);
+          if (personFolderId) linkedFolders.push(personFolderId);
+        }
+      }
+      event.smartFolderIds = Array.from(new Set(linkedFolders)).slice(0, 20);
+      await updateSubdoc(uid, 'memoryEvents', String(event.id), { smartFolderIds: event.smartFolderIds });
+      foldersChanged = true;
+    }
+    for (const event of calendarEvents.filter((item) => !item.deletedAt && !item.smartFolderIds?.length)) {
+      const category = event.category?.trim() || 'Agenda';
+      const linkedMemory = memories.find((memory) => memory.id === event.sourceMemoryId && !memory.deletedAt);
+      const linkedEvent = memoryEvents.find((memoryEvent) => memoryEvent.id === event.sourceMemoryEventId && !memoryEvent.deletedAt);
+      const ownFolderId = await ensureSmartFolder(uid, category, category);
+      event.smartFolderIds = Array.from(new Set([
+        ownFolderId,
+        ...(linkedMemory?.smartFolderIds || []),
+        ...(linkedEvent?.smartFolderIds || []),
+      ])).slice(0, 20);
+      await updateSubdoc(uid, 'calendarEvents', String(event.id), { smartFolderIds: event.smartFolderIds });
+      foldersChanged = true;
+    }
+    const folders = foldersChanged ? await listSubcollection<StoredSmartFolder>(uid, 'smartFolders') : initialFolders;
+    return {
+      folders: folders.filter((folder) => !folder.deletedAt).sort((a, b) => a.name.localeCompare(b.name)),
+      noteFolders: noteFolders.filter((folder) => !folder.deletedAt),
+      notes: notes.filter((note) => !note.deletedAt).map(({ embedding: _embedding, ...note }) => note),
+      memories: memories.filter((memory) => !memory.deletedAt).map(({ embedding: _embedding, ...memory }) => memory),
+      people: people.filter((person) => !person.deletedAt),
+      memoryEvents: memoryEvents
+        .filter((event) => !event.deletedAt)
+        .map(({ embedding: _embedding, ...event }) => event),
+      calendarEvents: calendarEvents.filter((event) => !event.deletedAt),
+    } as T;
+  }
+
+  if (pathname === '/api/smart-folders/assign' && method === 'POST') {
+    const typeToCollection: Record<string, string> = {
+      note: 'notes',
+      memory: 'memories',
+      memory_event: 'memoryEvents',
+      person: 'peopleEntities',
+      calendar_event: 'calendarEvents',
+    };
+    const recordType = typeof body.recordType === 'string' ? body.recordType : '';
+    const recordId = typeof body.recordId === 'number' ? body.recordId : Number(body.recordId);
+    const name = typeof body.name === 'string' ? body.name.trim() : '';
+    if (!typeToCollection[recordType] || !Number.isSafeInteger(recordId) || recordId <= 0 || !name) {
+      throw new Error('No se pudo asignar la carpeta inteligente: faltan datos válidos.');
+    }
+    const collectionName = typeToCollection[recordType];
+    const existing = await getSubdoc<Record<string, unknown>>(uid, collectionName, String(recordId));
+    if (!existing || existing.deletedAt) throw new Error('El elemento que intentás organizar ya no existe.');
+    const folderId = await ensureSmartFolder(uid, name, String(body.category || name));
+    const smartFolderIds = appendSmartFolderId(existing.smartFolderIds as string[] | undefined, folderId);
+    await updateSubdoc(uid, collectionName, String(recordId), { smartFolderIds });
+    return { folderId, smartFolderIds } as T;
   }
 
   if (pathname === '/api/dashboard/briefing' && method === 'POST') {
@@ -2348,8 +2856,29 @@ export async function dispatchSilvvRequest<T>(rawPath: string, options: RequestI
       const rawTitle = typeof body.title === 'string' ? body.title.trim() : '';
       const rawContent = typeof body.content === 'string' ? body.content : '';
       const isQuick = Boolean(body.isQuick);
-      const title = (rawTitle || (rawContent.trim().split('\n')[0] || 'Nota rápida')).slice(0, 200);
+      if (!isValidNoteDraft(rawTitle, rawContent)) throw new Error(getNoteValidationMessage());
+      const title = (rawTitle || rawContent.trim().split('\n')[0] || 'Nota rápida').slice(0, 200);
       const content = rawContent.slice(0, 65000);
+      const requestedSmartFolderName = typeof body.smartFolderName === 'string' ? body.smartFolderName.trim() : '';
+      const legacyFolder = typeof body.folderId === 'number'
+        ? await getSubdoc<StoredNoteFolder>(uid, 'noteFolders', String(body.folderId))
+        : null;
+      const smartFolderName = requestedSmartFolderName || legacyFolder?.name || 'Vida diaria';
+      const smartFolderCategory = typeof body.smartFolderCategory === 'string' && body.smartFolderCategory.trim()
+        ? body.smartFolderCategory.trim()
+        : smartFolderName;
+      const suppliedSmartFolderIds = Array.isArray(body.smartFolderIds)
+        ? Array.from(new Set(body.smartFolderIds.filter((folderId): folderId is string => typeof folderId === 'string'))).slice(0, 19)
+        : [];
+      const validSuppliedFolderIds: string[] = [];
+      for (const folderId of suppliedSmartFolderIds) {
+        const folder = await getSubdoc<StoredSmartFolder>(uid, 'smartFolders', folderId);
+        if (folder && !folder.deletedAt) validSuppliedFolderIds.push(folderId);
+      }
+      const smartFolderIds = Array.from(new Set([
+        ...validSuppliedFolderIds,
+        await ensureSmartFolder(uid, smartFolderName, smartFolderCategory),
+      ])).slice(0, 20);
 
       const embRes = content.trim()
         ? await withRaceTimeout(
@@ -2376,6 +2905,7 @@ export async function dispatchSilvvRequest<T>(rawPath: string, options: RequestI
         attachments: Array.isArray(body.attachments) ? (body.attachments as NoteAttachment[]).slice(0, 20) : [],
         sourceConversationId: typeof body.sourceConversationId === 'number' ? body.sourceConversationId : null,
         sourceMessageId: typeof body.sourceMessageId === 'number' ? body.sourceMessageId : null,
+        smartFolderIds,
         embedding: embRes.embedding ? embRes.embedding.slice(0, 4096) : null,
         deletedAt: null,
         createdAt: nowIso,
@@ -2437,6 +2967,9 @@ export async function dispatchSilvvRequest<T>(rawPath: string, options: RequestI
       const patch: Record<string, unknown> = {};
       if (typeof body.title === 'string' && body.title.trim()) patch.title = body.title.trim().slice(0, 200);
       if (typeof body.content === 'string') patch.content = body.content.slice(0, 65000);
+      if (!isValidNoteDraft(patch.title ?? existing.title, patch.content ?? existing.content)) {
+        throw new Error(getNoteValidationMessage());
+      }
       if (body.folderId !== undefined) patch.folderId = typeof body.folderId === 'number' ? body.folderId : null;
       if (body.projectId !== undefined) patch.projectId = typeof body.projectId === 'number' ? body.projectId : null;
       if (Array.isArray(body.tags)) {
@@ -2465,7 +2998,7 @@ export async function dispatchSilvvRequest<T>(rawPath: string, options: RequestI
       return clean as T;
     }
     if (method === 'DELETE') {
-      await updateSubdoc(uid, 'notes', String(id), { deletedAt: new Date().toISOString() });
+      await softDeleteOrganizationRecord(uid, 'note', id);
       return { ok: true, id } as T;
     }
   }
@@ -2502,6 +3035,16 @@ export async function dispatchSilvvRequest<T>(rawPath: string, options: RequestI
       const people = Array.isArray(body.people)
         ? Array.from(new Set(body.people.map((x) => String(x).trim()).filter(Boolean))).slice(0, 30)
         : [];
+      const category =
+        typeof body.category === 'string' && body.category.trim()
+          ? body.category.trim().slice(0, 64)
+          : 'Vida personal';
+      const smartFolderId = await ensureSmartFolder(uid, category, category);
+      const selectedPersonIds = new Set(
+        Array.isArray(body.personIds)
+          ? body.personIds.map(Number).filter((personId) => Number.isSafeInteger(personId) && personId > 0)
+          : [],
+      );
 
       const embRes = await withRaceTimeout(
         callServerEndpoint<{ embedding: number[] | null }>('/api/ai/embed', 'POST', {
@@ -2525,10 +3068,8 @@ export async function dispatchSilvvRequest<T>(rawPath: string, options: RequestI
             : eventDate
             ? eventDate.slice(0, 10)
             : 'Sin fecha precisa',
-        category:
-          typeof body.category === 'string' && body.category.trim()
-            ? body.category.trim().slice(0, 64)
-            : 'Vida personal',
+        category,
+        smartFolderIds: [smartFolderId],
         people,
         projectId: typeof body.projectId === 'number' ? body.projectId : null,
         sourceConversationId: null,
@@ -2553,21 +3094,27 @@ export async function dispatchSilvvRequest<T>(rawPath: string, options: RequestI
         }).catch(() => {});
       }
 
-      // Sync people entities
-      const allPeople = await listSubcollection<PersonEntityItem>(uid, 'peopleEntities');
+      // Name matches are never enough to merge a profile; users explicitly select existing identities.
+      const allPeople = (await listSubcollection<StoredPerson>(uid, 'peopleEntities')).filter((person) => !person.deletedAt);
+      const personFolderIds: string[] = [];
       for (const pName of people) {
         const norm = normalizeName(pName);
         if (!norm) continue;
-        const found = allPeople.find((p) => p.normalizedName === norm);
-        let personId: number;
+        const found = allPeople.find((person) => selectedPersonIds.has(person.id) && person.normalizedName === norm);
+        const personId = found?.id ?? nextNumericId();
+        const personFolderId = await ensureSmartFolder(uid, pName, 'Personas', `person-${personId}`);
+        personFolderIds.push(personFolderId);
+        const linkedPersonFolders = appendSmartFolderId(
+          appendSmartFolderId(found?.smartFolderIds, smartFolderId),
+          personFolderId,
+        );
         if (found) {
-          personId = found.id;
           await updateSubdoc(uid, 'peopleEntities', String(found.id), {
             mentionCount: found.mentionCount + 1,
             lastMentionedAt: eventDate || nowIso,
+            smartFolderIds: linkedPersonFolders,
           });
         } else {
-          personId = nextNumericId();
           await createSubdoc(uid, 'peopleEntities', String(personId), {
             id: personId,
             name: pName.slice(0, 120),
@@ -2576,6 +3123,7 @@ export async function dispatchSilvvRequest<T>(rawPath: string, options: RequestI
             notes: null,
             mentionCount: 1,
             lastMentionedAt: eventDate || nowIso,
+            smartFolderIds: linkedPersonFolders,
           });
         }
         const relId = nextNumericId();
@@ -2588,6 +3136,8 @@ export async function dispatchSilvvRequest<T>(rawPath: string, options: RequestI
           relationKind: 'involves_person',
         });
       }
+      const eventSmartFolderIds = Array.from(new Set([smartFolderId, ...personFolderIds])).slice(0, 20);
+      await updateSubdoc(uid, 'memoryEvents', String(id), { smartFolderIds: eventSmartFolderIds });
 
       const { embedding: _e, ...clean } = item;
       return clean as T;
@@ -2598,6 +3148,8 @@ export async function dispatchSilvvRequest<T>(rawPath: string, options: RequestI
   if (memEvMatch) {
     const id = Number(memEvMatch[1]);
     if (method === 'PATCH') {
+      const existing = await getSubdoc<StoredMemoryEvent>(uid, 'memoryEvents', String(id));
+      if (!existing || existing.deletedAt) throw new Error('Evento de memoria no encontrado.');
       const patch: Record<string, unknown> = {};
       if (typeof body.title === 'string' && body.title.trim()) patch.title = body.title.trim().slice(0, 200);
       if (typeof body.description === 'string' && body.description.trim()) {
@@ -2610,9 +3162,55 @@ export async function dispatchSilvvRequest<T>(rawPath: string, options: RequestI
         patch.datePrecision = body.datePrecision;
       }
       if (typeof body.dateLabel === 'string') patch.dateLabel = body.dateLabel.slice(0, 120) || null;
-      if (typeof body.category === 'string' && body.category.trim()) patch.category = body.category.trim().slice(0, 64);
+      if (typeof body.category === 'string' && body.category.trim()) {
+        const category = body.category.trim().slice(0, 64);
+        patch.category = category;
+        patch.smartFolderIds = appendSmartFolderId(existing.smartFolderIds, await ensureSmartFolder(uid, category, category));
+      }
       if (Array.isArray(body.people)) {
-        patch.people = body.people.map((x) => String(x).trim()).filter(Boolean).slice(0, 30);
+        patch.people = Array.from(new Set(body.people.map((x) => String(x).trim()).filter(Boolean))).slice(0, 30);
+      }
+      if (Array.isArray(body.personIds)) {
+        const selectedIds = new Set(body.personIds.map(Number).filter((personId) => Number.isSafeInteger(personId) && personId > 0));
+        const allRelations = await listSubcollection<EventRelationItem>(uid, 'eventRelations');
+        const currentRelations = allRelations.filter(
+          (relation) => relation.sourceEventId === id && relation.targetType === 'person',
+        );
+        const linkedPersonFolderIds: string[] = [];
+        for (const personId of selectedIds) {
+          const profile = await getSubdoc<StoredPerson>(uid, 'peopleEntities', String(personId));
+          if (!profile || profile.deletedAt) continue;
+          const matchesEventName = (Array.isArray(patch.people) ? patch.people as string[] : existing.people)
+            .some((personName) => normalizeName(personName) === profile.normalizedName);
+          if (!matchesEventName) continue;
+          const personFolderId = await ensureSmartFolder(uid, profile.name, 'Personas', `person-${profile.id}`);
+          linkedPersonFolderIds.push(personFolderId);
+          if (!currentRelations.some((relation) => relation.targetId === profile.id)) {
+            const relationId = nextNumericId();
+            await createSubdoc(uid, 'eventRelations', String(relationId), {
+              id: relationId,
+              sourceEventId: id,
+              targetType: 'person',
+              targetId: profile.id,
+              targetLabel: profile.name.slice(0, 200),
+              relationKind: 'involves_person',
+            });
+          }
+          await updateSubdoc(uid, 'peopleEntities', String(profile.id), {
+            smartFolderIds: appendSmartFolderId(profile.smartFolderIds, personFolderId),
+          });
+        }
+        for (const relation of currentRelations) {
+          if (!selectedIds.has(relation.targetId)) {
+            await deleteSubdoc(uid, 'eventRelations', String(relation.id));
+          }
+        }
+        const previousPersonFolderIds = currentRelations.map((relation) => `person-${relation.targetId}`);
+        const currentSmartFolderIds = (patch.smartFolderIds as string[] | undefined) || existing.smartFolderIds || [];
+        patch.smartFolderIds = Array.from(new Set([
+          ...currentSmartFolderIds.filter((folderId) => !previousPersonFolderIds.includes(folderId)),
+          ...linkedPersonFolderIds,
+        ])).slice(0, 20);
       }
       if (Array.isArray(body.tags)) patch.tags = body.tags.map(String).slice(0, 20);
       if (typeof body.importance === 'number') patch.importance = Math.min(5, Math.max(1, body.importance));
@@ -2625,16 +3223,50 @@ export async function dispatchSilvvRequest<T>(rawPath: string, options: RequestI
       return clean as T;
     }
     if (method === 'DELETE') {
-      await updateSubdoc(uid, 'memoryEvents', String(id), { deletedAt: new Date().toISOString() });
+      await softDeleteOrganizationRecord(uid, 'memory_event', id);
       return { ok: true, id } as T;
     }
   }
 
   if (pathname === '/api/people' && method === 'GET') {
-    const rows = (await listSubcollection<PersonEntityItem>(uid, 'peopleEntities')).sort(
-      (a, b) => b.mentionCount - a.mentionCount,
-    );
+    const rows = (await listSubcollection<StoredPerson>(uid, 'peopleEntities'))
+      .filter((person) => !person.deletedAt)
+      .sort((a, b) => b.mentionCount - a.mentionCount);
     return rows as T;
+  }
+
+  const personMatch = pathname.match(/^\/api\/people\/(\d+)$/);
+  if (personMatch) {
+    const id = Number(personMatch[1]);
+    const existing = await getSubdoc<StoredPerson>(uid, 'peopleEntities', String(id));
+    if (!existing || existing.deletedAt) throw new Error('Perfil no encontrado.');
+    if (method === 'PATCH') {
+      const patch: Record<string, unknown> = {};
+      if (typeof body.name === 'string' && body.name.trim()) {
+        const name = body.name.trim().split(' ').filter(Boolean).join(' ').slice(0, 120);
+        patch.name = name;
+        patch.normalizedName = normalizeName(name).slice(0, 120);
+      }
+      if (typeof body.relationship === 'string' || body.relationship === null) {
+        patch.relationship = typeof body.relationship === 'string' ? body.relationship.trim().slice(0, 120) || null : null;
+      }
+      if (typeof body.notes === 'string' || body.notes === null) {
+        patch.notes = typeof body.notes === 'string' ? body.notes.trim().slice(0, 2000) || null : null;
+      }
+      if (typeof body.photoUrl === 'string' || body.photoUrl === null) {
+        const photoUrl = typeof body.photoUrl === 'string' ? body.photoUrl.trim() : '';
+        if (photoUrl && !photoUrl.toLowerCase().startsWith('https://')) throw new Error('La foto debe usar una URL HTTPS.');
+        patch.photoUrl = photoUrl || null;
+      }
+      await updateSubdoc(uid, 'peopleEntities', String(id), patch);
+      const updated = await getSubdoc<StoredPerson>(uid, 'peopleEntities', String(id));
+      if (!updated) throw new Error('Perfil no encontrado.');
+      return updated as T;
+    }
+    if (method === 'DELETE') {
+      await softDeleteOrganizationRecord(uid, 'person', id);
+      return { ok: true, id } as T;
+    }
   }
 
   if (pathname === '/api/event-relations' && method === 'GET') {
@@ -3106,6 +3738,16 @@ export async function dispatchSilvvRequest<T>(rawPath: string, options: RequestI
         new Date(new Date(startIso).getTime() + 3600000).toISOString();
       const eventId = nextNumericId();
       const title = String(payload.title || 'Evento').slice(0, 180);
+      const sourceMemoryId = typeof payload.sourceMemoryId === 'number' ? payload.sourceMemoryId : null;
+      const sourceMemory = sourceMemoryId
+        ? await getSubdoc<StoredMemory>(uid, 'memories', String(sourceMemoryId))
+        : null;
+      if (sourceMemoryId && (!sourceMemory || sourceMemory.deletedAt)) {
+        throw new Error('El recuerdo vinculado ya no existe.');
+      }
+      const category = payload.category ? String(payload.category).slice(0, 64) : 'Agenda';
+      const eventFolderId = await ensureSmartFolder(uid, category, category);
+      const smartFolderIds = Array.from(new Set([eventFolderId, ...(sourceMemory?.smartFolderIds || [])])).slice(0, 20);
       await createSubdoc(uid, 'calendarEvents', String(eventId), {
         id: eventId,
         projectId: null,
@@ -3114,7 +3756,10 @@ export async function dispatchSilvvRequest<T>(rawPath: string, options: RequestI
         syncStatus: 'local_only',
         title,
         description: payload.description ? String(payload.description).slice(0, 2000) : null,
-        category: payload.category ? String(payload.category).slice(0, 64) : 'Agenda',
+        category,
+        smartFolderIds,
+        sourceMemoryId,
+        sourceMemoryEventId: null,
         location: payload.location ? String(payload.location).slice(0, 240) : null,
         startAt: startIso,
         endAt: endIso,
@@ -3182,15 +3827,18 @@ export async function dispatchSilvvRequest<T>(rawPath: string, options: RequestI
         text: `${title || ''} ${content}`,
       }).catch(() => ({ embedding: null }));
 
+      const category =
+        typeof body.category === 'string' && body.category.trim()
+          ? body.category.trim().slice(0, 64)
+          : 'General';
+      const smartFolderId = await ensureSmartFolder(uid, category, category);
       const memId = nextNumericId();
       const item: StoredMemory = {
         id: memId,
         memoryLayer: layer,
         originKind: typeof body.originKind === 'string' ? body.originKind.slice(0, 32) : 'fact',
-        category:
-          typeof body.category === 'string' && body.category.trim()
-            ? body.category.trim().slice(0, 64)
-            : 'General',
+        category,
+        smartFolderIds: [smartFolderId],
         title,
         content: content.slice(0, 16000),
         tags: Array.isArray(body.tags) ? body.tags.map(String).slice(0, 16) : [],
@@ -3274,7 +3922,7 @@ export async function dispatchSilvvRequest<T>(rawPath: string, options: RequestI
       return updated as T;
     }
     if (method === 'DELETE') {
-      await updateSubdoc(uid, 'memories', String(id), { deletedAt: new Date().toISOString() });
+      await softDeleteOrganizationRecord(uid, 'memory', id);
       return { ok: true, id } as T;
     }
   }
@@ -3570,6 +4218,13 @@ export async function dispatchSilvvRequest<T>(rawPath: string, options: RequestI
         syncStatus = 'synced';
       }
 
+      const sourceMemoryId = typeof body.sourceMemoryId === 'number' ? body.sourceMemoryId : null;
+      if (sourceMemoryId !== null) {
+        const sourceMemory = await getSubdoc<StoredMemory>(uid, 'memories', String(sourceMemoryId));
+        if (!sourceMemory || sourceMemory.deletedAt) throw new Error('El recuerdo vinculado ya no existe.');
+      }
+      const eventCategory = typeof body.category === 'string' && body.category.trim() ? body.category.trim().slice(0, 64) : 'Agenda';
+      const smartFolderId = await ensureSmartFolder(uid, eventCategory, eventCategory);
       const id = nextNumericId();
       const created: StoredEvent = {
         id,
@@ -3579,7 +4234,10 @@ export async function dispatchSilvvRequest<T>(rawPath: string, options: RequestI
         syncStatus,
         title: title.slice(0, 180),
         description: typeof body.description === 'string' ? body.description.trim().slice(0, 2000) || null : null,
-        category: typeof body.category === 'string' ? body.category.trim().slice(0, 64) : 'Agenda',
+        category: eventCategory,
+        smartFolderIds: [smartFolderId],
+        sourceMemoryId,
+        sourceMemoryEventId: typeof body.sourceMemoryEventId === 'number' ? body.sourceMemoryEventId : null,
         location: typeof body.location === 'string' ? body.location.trim().slice(0, 240) || null : null,
         startAt: startIso,
         endAt: endIso,
@@ -3739,7 +4397,7 @@ export async function dispatchSilvvRequest<T>(rawPath: string, options: RequestI
           true,
         ).catch(() => {});
       }
-      await updateSubdoc(uid, 'calendarEvents', String(id), { deletedAt: new Date().toISOString() });
+      await softDeleteOrganizationRecord(uid, 'calendar_event', id);
       return { ok: true, id } as T;
     }
   }

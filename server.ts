@@ -692,6 +692,7 @@ app.use(express.json({ limit: '45mb' }));
           relevantMemories: Array.isArray(context?.relevantMemories) ? context.relevantMemories : [],
           relevantNotes: Array.isArray(context?.relevantNotes) ? context.relevantNotes : [],
           relevantMemoryEvents: Array.isArray(context?.relevantMemoryEvents) ? context.relevantMemoryEvents : [],
+          knownPeople: Array.isArray(context?.knownPeople) ? context.knownPeople : [],
           availableCategories: Array.isArray(context?.availableCategories) ? context.availableCategories : [],
           pendingTasks: Array.isArray(context?.pendingTasks) ? context.pendingTasks : [],
           upcomingEvents: Array.isArray(context?.upcomingEvents) ? context.upcomingEvents : [],

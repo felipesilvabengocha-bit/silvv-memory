@@ -23,11 +23,10 @@ import {
   Moon,
   Search,
   Settings,
-  StickyNote,
   Sun,
   X,
 } from 'lucide-react';
-import { auth, clearGoogleAccessToken } from './lib/firebase';
+import { auth, clearGoogleAccessToken, subscribeToOrganizationChanges } from './lib/firebase';
 import {
   apiRequest,
   type DashboardData,
@@ -37,16 +36,14 @@ import {
 } from './lib/api';
 import { AuthScreen } from './components/AuthScreen';
 import { DashboardView, type NavTab } from './components/DashboardView';
+import type { OrganizationCategory } from './components/OrganizationView';
 import { CommandSearchModal } from './components/CommandSearchModal';
 
 const InboxView = lazy(() =>
   import('./components/InboxView').then((module) => ({ default: module.InboxView })),
 );
-const NotesView = lazy(() =>
-  import('./components/NotesView').then((module) => ({ default: module.NotesView })),
-);
-const MemoryView = lazy(() =>
-  import('./components/MemoryView').then((module) => ({ default: module.MemoryView })),
+const OrganizationView = lazy(() =>
+  import('./components/OrganizationView').then((module) => ({ default: module.OrganizationView })),
 );
 const CalendarTasksView = lazy(() =>
   import('./components/CalendarTasksView').then((module) => ({ default: module.CalendarTasksView })),
@@ -67,8 +64,7 @@ const SettingsTrashView = lazy(() =>
 const NAV_ITEMS: Array<{ id: NavTab; label: string; shortLabel: string; icon: typeof LayoutDashboard }> = [
   { id: 'dashboard', label: 'Inicio', shortLabel: 'Inicio', icon: LayoutDashboard },
   { id: 'chat', label: 'Chat', shortLabel: 'Chat', icon: MessageSquare },
-  { id: 'notes', label: 'Notas', shortLabel: 'Notas', icon: StickyNote },
-  { id: 'memory', label: 'Memoria y carpetas', shortLabel: 'Memoria', icon: Brain },
+  { id: 'memory', label: 'Organización inteligente', shortLabel: 'Organizar', icon: Brain },
   { id: 'calendar', label: 'Agenda inteligente', shortLabel: 'Agenda', icon: Calendar },
   { id: 'summaries', label: 'Resúmenes', shortLabel: 'Resúmenes', icon: BookOpenText },
   { id: 'knowledge', label: 'Chat de conocimiento', shortLabel: 'Saber', icon: FileSearch },
@@ -77,7 +73,7 @@ const NAV_ITEMS: Array<{ id: NavTab; label: string; shortLabel: string; icon: ty
 ];
 
 // 5 primary sections on iPhone / mobile fixed bottom navigation bar
-const MOBILE_PRIMARY_TABS: NavTab[] = ['chat', 'notes', 'memory', 'calendar', 'summaries'];
+const MOBILE_PRIMARY_TABS: NavTab[] = ['chat', 'memory', 'calendar', 'summaries', 'dashboard'];
 
 const routeVariants = {
   enter: (direction: 'forward' | 'backward') => ({
@@ -167,7 +163,7 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [viewDirection, setViewDirection] = useState<'forward' | 'backward'>('forward');
-  const [notesVisited, setNotesVisited] = useState(false);
+  const [organizationCategory, setOrganizationCategory] = useState<OrganizationCategory>('notes');
   const [selectedConvId, setSelectedConvId] = useState<number | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -236,10 +232,6 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (activeTab === 'notes') setNotesVisited(true);
-  }, [activeTab]);
-
-  useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
@@ -281,6 +273,14 @@ export default function App() {
   }, [firebaseUser]);
 
   useEffect(() => {
+    if (!firebaseUser) return;
+    return subscribeToOrganizationChanges(firebaseUser.uid, (collectionName) => {
+      window.dispatchEvent(new CustomEvent('silvv:organization-change', { detail: { collectionName } }));
+      void loadWorkspace();
+    });
+  }, [firebaseUser, loadWorkspace]);
+
+  useEffect(() => {
     if (authReady && firebaseUser) {
       loadWorkspace();
     } else if (authReady && !firebaseUser) {
@@ -309,11 +309,14 @@ export default function App() {
 
   const handleNavigate = (tab: NavTab, convId?: number) => {
     if (convId !== undefined) setSelectedConvId(convId);
-    if (tab !== activeTab) {
+    if (tab === 'notes') setOrganizationCategory('notes');
+    else if (tab === 'memory') setOrganizationCategory('memories');
+    const nextTab: NavTab = tab === 'notes' ? 'memory' : tab;
+    if (nextTab !== activeTab) {
       const currentIndex = NAV_ITEMS.findIndex((item) => item.id === activeTab);
-      const nextIndex = NAV_ITEMS.findIndex((item) => item.id === tab);
+      const nextIndex = NAV_ITEMS.findIndex((item) => item.id === nextTab);
       setViewDirection(nextIndex >= currentIndex ? 'forward' : 'backward');
-      setActiveTab(tab);
+      setActiveTab(nextTab);
     }
   };
 
@@ -635,19 +638,11 @@ export default function App() {
                 />
               )}
 
-              {(activeTab === 'notes' || notesVisited) && (
-                <div className={activeTab === 'notes' ? 'contents' : 'hidden'}>
-                  <NotesView
-                    key={firebaseUser.uid}
-                    isActive={activeTab === 'notes'}
-                    onDataChanged={loadWorkspace}
-                    onAskInChat={handleQuickSend}
-                  />
-                </div>
-              )}
-
               {activeTab === 'memory' && (
-                <MemoryView
+                <OrganizationView
+                  isActive={activeTab === 'memory'}
+                  activeCategory={organizationCategory}
+                  onCategoryChange={setOrganizationCategory}
                   onDataChanged={loadWorkspace}
                   onGoToChat={() => handleNavigate('chat')}
                 />
