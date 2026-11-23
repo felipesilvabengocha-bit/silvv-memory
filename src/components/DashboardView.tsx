@@ -23,6 +23,7 @@ export type NavTab =
   | 'memory'
   | 'calendar'
   | 'summaries'
+  | 'insights'
   | 'knowledge'
   | 'agents'
   | 'settings';

@@ -7,6 +7,7 @@ import {
   Calendar,
   FileSearch,
   MessageSquare,
+  Sparkles,
   StickyNote,
 } from 'lucide-react';
 import {
@@ -114,7 +115,7 @@ export function AuthScreen() {
         <div className="lg:col-span-5 glass-panel rounded-2xl p-6 space-y-4">
           <div className="space-y-1 pb-3 border-b border-zinc-200/70 dark:border-white/10">
             <h2 className="font-display text-base font-semibold text-zinc-900 dark:text-zinc-100">
-              Las 7 secciones de SILVV MEMORY
+              Las 8 secciones de SILVV MEMORY
             </h2>
             <p className="text-xs text-zinc-500 dark:text-zinc-400">
               Arquitectura central compartida con funciones especializadas.
@@ -164,6 +165,15 @@ export function AuthScreen() {
                 <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">Resúmenes</p>
                 <p className="text-xs text-zinc-500 dark:text-zinc-400">
                   Diarios, semanales y mensuales estrictamente basados en tus registros reales.
+                </p>
+              </div>
+            </li>
+            <li className="flex items-start gap-3">
+              <Sparkles className="w-4 h-4 text-violet-600 dark:text-violet-400 mt-0.5 shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">Insights personales</p>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                  Descubrimientos conectados con evidencia real de tus conversaciones, notas, recuerdos y proyectos.
                 </p>
               </div>
             </li>

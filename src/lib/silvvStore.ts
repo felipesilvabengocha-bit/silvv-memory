@@ -239,6 +239,7 @@ async function callServerEndpoint<T>(
   method: string,
   body?: unknown,
   includeGoogleToken = false,
+  timeoutMs = 35000,
 ): Promise<T> {
   const user = requireCurrentUser();
   const token = await user.getIdToken();
@@ -252,7 +253,7 @@ async function callServerEndpoint<T>(
   }
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 35000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(path, {
       method,
@@ -2439,6 +2440,29 @@ export async function dispatchSilvvRequest<T>(rawPath: string, options: RequestI
 
   if (pathname === '/api/ai/note-organization' && method === 'POST') {
     return (await callServerEndpoint('/api/ai/note-organization', 'POST', body)) as T;
+  }
+
+  if (pathname === '/api/insights' && method === 'GET') {
+    return (await callServerEndpoint('/api/insights', 'GET')) as T;
+  }
+
+  if (pathname === '/api/insights/refresh' && method === 'POST') {
+    return (await callServerEndpoint('/api/insights/refresh', 'POST', body, false, 55000)) as T;
+  }
+
+  const insightQuestionMatch = pathname.match(/^\/api\/insights\/([a-f0-9]{24})\/question$/);
+  if (insightQuestionMatch && method === 'POST') {
+    return (await callServerEndpoint(pathname, 'POST', body, false, 30000)) as T;
+  }
+
+  const insightCorrectionMatch = pathname.match(/^\/api\/insights\/([a-f0-9]{24})\/correction$/);
+  if (insightCorrectionMatch && method === 'POST') {
+    return (await callServerEndpoint(pathname, 'POST', body)) as T;
+  }
+
+  const insightUpdateMatch = pathname.match(/^\/api\/insights\/([a-f0-9]{24})$/);
+  if (insightUpdateMatch && method === 'PATCH') {
+    return (await callServerEndpoint(pathname, 'PATCH', body)) as T;
   }
 
   if (pathname === '/api/organization' && method === 'GET') {
