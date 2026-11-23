@@ -152,6 +152,7 @@ export default function App() {
   const [dashError, setDashError] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
+  const [viewDirection, setViewDirection] = useState<'forward' | 'backward'>('forward');
   const [notesVisited, setNotesVisited] = useState(false);
   const [selectedConvId, setSelectedConvId] = useState<number | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -294,12 +295,17 @@ export default function App() {
 
   const handleNavigate = (tab: NavTab, convId?: number) => {
     if (convId !== undefined) setSelectedConvId(convId);
-    setActiveTab(tab);
+    if (tab !== activeTab) {
+      const currentIndex = NAV_ITEMS.findIndex((item) => item.id === activeTab);
+      const nextIndex = NAV_ITEMS.findIndex((item) => item.id === tab);
+      setViewDirection(nextIndex >= currentIndex ? 'forward' : 'backward');
+      setActiveTab(tab);
+    }
   };
 
   const handleQuickSend = (text: string) => {
     setQuickChatText(text);
-    setActiveTab('chat');
+    handleNavigate('chat');
   };
 
   const handleSignOut = async () => {
@@ -342,7 +348,7 @@ export default function App() {
               <div className="px-2 flex items-center justify-between">
                 <button
                   type="button"
-                  onClick={() => setActiveTab('dashboard')}
+                  onClick={() => handleNavigate('dashboard')}
                   className="font-display text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-50 whitespace-nowrap shrink-0 cursor-pointer"
                 >
                   SILVV MEMORY
@@ -369,7 +375,8 @@ export default function App() {
                     <button
                       key={item.id}
                       type="button"
-                      onClick={() => setActiveTab(item.id)}
+                      onClick={() => handleNavigate(item.id)}
+                      aria-current={active ? 'page' : undefined}
                       className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-colors cursor-pointer whitespace-nowrap ${
                         active
                           ? 'bg-violet-600/15 text-violet-700 dark:text-violet-300 font-medium'
@@ -451,9 +458,10 @@ export default function App() {
                           key={item.id}
                           type="button"
                           onClick={() => {
-                            setActiveTab(item.id);
+                            handleNavigate(item.id);
                             setMobileNavOpen(false);
                           }}
+                          aria-current={active ? 'page' : undefined}
                           className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm cursor-pointer whitespace-nowrap ${
                             active
                               ? 'bg-violet-600/15 text-violet-700 dark:text-violet-300 font-medium'
@@ -496,7 +504,7 @@ export default function App() {
                 <div className="flex items-center gap-2 text-sm truncate">
                   <button
                     type="button"
-                    onClick={() => setActiveTab('dashboard')}
+                    onClick={() => handleNavigate('dashboard')}
                     className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hidden sm:inline cursor-pointer whitespace-nowrap shrink-0"
                   >
                     SILVV MEMORY
@@ -527,7 +535,7 @@ export default function App() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setActiveTab('chat')}
+                  onClick={() => handleNavigate('chat')}
                   className="px-3.5 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0"
                 >
                   Chat general
@@ -545,6 +553,7 @@ export default function App() {
               <Suspense fallback={<ViewLoadingState isFullBleed={isFullBleedChat} />}>
                 <div
                   key={activeTab}
+                  data-direction={viewDirection}
                   className={`silvv-view-transition ${isFullBleedChat ? 'h-full min-h-0' : ''}`}
                 >
               {activeTab === 'dashboard' && (
@@ -585,7 +594,7 @@ export default function App() {
               {activeTab === 'memory' && (
                 <MemoryView
                   onDataChanged={loadWorkspace}
-                  onGoToChat={() => setActiveTab('chat')}
+                  onGoToChat={() => handleNavigate('chat')}
                 />
               )}
 
@@ -603,7 +612,7 @@ export default function App() {
               {activeTab === 'summaries' && (
                 <SummariesView
                   onDataChanged={loadWorkspace}
-                  onNavigateToNotes={() => setActiveTab('notes')}
+                  onNavigateToNotes={() => handleNavigate('notes')}
                 />
               )}
 
@@ -642,7 +651,8 @@ export default function App() {
                   <button
                     key={tabId}
                     type="button"
-                    onClick={() => setActiveTab(tabId)}
+                    onClick={() => handleNavigate(tabId)}
+                    aria-current={active ? 'page' : undefined}
                     className={`min-h-[52px] flex flex-col items-center justify-center gap-0.5 px-1 py-1.5 text-[11px] font-medium cursor-pointer transition-all duration-150 active:scale-95 ${
                       active
                         ? 'text-violet-600 dark:text-violet-400'
@@ -660,7 +670,7 @@ export default function App() {
           <CommandSearchModal
             open={searchOpen}
             onClose={() => setSearchOpen(false)}
-            onNavigate={(tab) => setActiveTab(tab)}
+            onNavigate={handleNavigate}
           />
         </div>
     </SilvvErrorBoundary>

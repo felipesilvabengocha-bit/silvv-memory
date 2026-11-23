@@ -590,6 +590,7 @@ export function CalendarTasksView({
           <button
             type="button"
             onClick={() => setSpace('memoria')}
+            aria-pressed={space === 'memoria'}
             className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-colors whitespace-nowrap shrink-0 ${
               space === 'memoria'
                 ? 'bg-white dark:bg-[#1E1E26] text-zinc-900 dark:text-zinc-50 shadow-xs'
@@ -602,6 +603,7 @@ export function CalendarTasksView({
           <button
             type="button"
             onClick={() => setSpace('real')}
+            aria-pressed={space === 'real'}
             className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-colors whitespace-nowrap shrink-0 ${
               space === 'real'
                 ? 'bg-white dark:bg-[#1E1E26] text-zinc-900 dark:text-zinc-50 shadow-xs'
@@ -615,7 +617,7 @@ export function CalendarTasksView({
       </div>
 
       {error && (
-        <div className="p-3.5 rounded-xl border border-red-300 dark:border-red-900/60 bg-red-50/80 dark:bg-red-950/30 text-sm text-red-700 dark:text-red-300 flex items-center justify-between gap-2">
+        <div className="p-3.5 rounded-xl border border-red-300 dark:border-red-900/60 bg-red-50/80 dark:bg-red-950/30 text-sm text-red-700 dark:text-red-300 flex items-center justify-between gap-2 animate-silvv-in">
           <span>{error}</span>
           <button type="button" onClick={() => setError(null)} className="cursor-pointer">
             <X className="w-4 h-4" />
@@ -624,7 +626,7 @@ export function CalendarTasksView({
       )}
 
       {notice && (
-        <div className="p-3.5 rounded-xl border border-amber-300 dark:border-amber-800/80 bg-amber-50/80 dark:bg-amber-950/30 text-sm text-amber-800 dark:text-amber-300 flex items-center justify-between gap-2">
+        <div className="p-3.5 rounded-xl border border-amber-300 dark:border-amber-800/80 bg-amber-50/80 dark:bg-amber-950/30 text-sm text-amber-800 dark:text-amber-300 flex items-center justify-between gap-2 animate-silvv-in">
           <span>{notice}</span>
           <button type="button" onClick={() => setNotice(null)} className="cursor-pointer">
             <X className="w-4 h-4" />
@@ -634,7 +636,7 @@ export function CalendarTasksView({
 
       {/* ==================== SPACE 1: AGENDA MEMORIA ==================== */}
       {space === 'memoria' && (
-        <div className="space-y-5">
+        <div className="space-y-5 animate-silvv-calendar-in">
           {/* Controls bar */}
           <div className="glass-panel rounded-2xl p-4 space-y-3">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
@@ -652,6 +654,7 @@ export function CalendarTasksView({
                     key={vm.id}
                     type="button"
                     onClick={() => setMemViewMode(vm.id)}
+                    aria-pressed={memViewMode === vm.id}
                     className={`px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer whitespace-nowrap shrink-0 ${
                       memViewMode === vm.id
                         ? 'bg-white dark:bg-[#1E1E26] text-zinc-900 dark:text-zinc-50 shadow-xs'
@@ -691,6 +694,7 @@ export function CalendarTasksView({
                 <button
                   type="button"
                   onClick={() => setShowCatManager((v) => !v)}
+                  aria-expanded={showCatManager}
                   className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl glass-subtle text-xs text-zinc-700 dark:text-zinc-200 cursor-pointer whitespace-nowrap shrink-0"
                 >
                   <Tag className="w-3.5 h-3.5" />
@@ -758,7 +762,7 @@ export function CalendarTasksView({
               ))}
             </div>
           ) : memViewMode === 'timeline' ? (
-            <div className="glass-panel rounded-2xl divide-y divide-zinc-200/60 dark:divide-white/5">
+            <div className="silvv-stagger-list glass-panel rounded-2xl divide-y divide-zinc-200/60 dark:divide-white/5">
               {filteredMemoryEvents.length === 0 ? (
                 <div className="p-10 text-center space-y-2">
                   <BookHeart className="w-7 h-7 text-zinc-400 mx-auto" />
@@ -773,7 +777,7 @@ export function CalendarTasksView({
                 filteredMemoryEvents.map((ev) => (
                   <div
                     key={ev.id}
-                    className="p-5 flex items-start justify-between gap-4 hover:bg-zinc-100/40 dark:hover:bg-white/[0.02] transition-colors"
+                    className="silvv-calendar-event p-5 flex items-start justify-between gap-4 hover:bg-zinc-100/40 dark:hover:bg-white/[0.02] transition-colors"
                   >
                     <button
                       type="button"
@@ -871,7 +875,7 @@ export function CalendarTasksView({
                   return (
                     <div
                       key={cell.key}
-                      className={`min-h-[84px] rounded-xl p-2 text-xs ${
+                      className={`animate-silvv-calendar-day min-h-[84px] rounded-xl p-2 text-xs ${
                         cell.day ? 'glass-subtle' : 'opacity-20'
                       }`}
                     >
@@ -953,7 +957,7 @@ export function CalendarTasksView({
                     (e) => e.eventDate?.slice(0, 10) === wd.key,
                   );
                   return (
-                    <div key={wd.key} className="glass-subtle rounded-xl p-3 space-y-2 min-h-[160px]">
+                    <div key={wd.key} className="animate-silvv-calendar-day glass-subtle rounded-xl p-3 space-y-2 min-h-[160px]">
                       <p className="text-xs font-medium text-zinc-700 dark:text-zinc-300 capitalize tabular-nums">
                         {wd.label}
                       </p>
@@ -1039,6 +1043,7 @@ export function CalendarTasksView({
                     key={g.id}
                     type="button"
                     onClick={() => setGroupBy(g.id)}
+                    aria-pressed={groupBy === g.id}
                     className={`px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer whitespace-nowrap ${
                       groupBy === g.id
                         ? 'bg-white dark:bg-[#1E1E26] text-zinc-900 dark:text-zinc-50'
@@ -1189,7 +1194,7 @@ export function CalendarTasksView({
 
       {/* ==================== SPACE 2: AGENDA REAL + TASKS ==================== */}
       {space === 'real' && (
-        <div className="space-y-5">
+        <div className="space-y-5 animate-silvv-calendar-in">
           <div className="glass-panel rounded-2xl px-5 py-3.5 flex flex-wrap items-center justify-between gap-3">
             <div className="text-xs text-zinc-600 dark:text-zinc-300">
               Google Calendar:{' '}
@@ -1276,7 +1281,7 @@ export function CalendarTasksView({
               {showEventForm && (
                 <form
                   onSubmit={handleSubmitEventForm}
-                  className="p-4 rounded-xl glass-subtle space-y-3"
+                  className="p-4 rounded-xl glass-subtle space-y-3 animate-silvv-popover-in"
                 >
                   <input
                     type="text"
@@ -1361,7 +1366,7 @@ export function CalendarTasksView({
                   {events.map((ev) => {
                     const isFinished = new Date(ev.endAt).getTime() < nowMs;
                     return (
-                      <li key={ev.id} className="py-3.5 space-y-2">
+                      <li key={ev.id} className="silvv-calendar-event animate-silvv-calendar-day py-3.5 space-y-2">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0 space-y-0.5">
                             <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
@@ -1435,6 +1440,7 @@ export function CalendarTasksView({
                       key={st}
                       type="button"
                       onClick={() => setTaskFilter(st)}
+                      aria-pressed={taskFilter === st}
                       className={`px-2.5 py-1 rounded-lg text-xs font-medium cursor-pointer whitespace-nowrap ${
                         taskFilter === st
                           ? 'bg-white dark:bg-[#1E1E26] text-zinc-900 dark:text-zinc-100'
@@ -1555,13 +1561,13 @@ export function CalendarTasksView({
       {/* ==================== MODAL: CREATE/EDIT AGENDA MEMORIA EVENT ==================== */}
       {showMemForm && (
         <div
-          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
+                  className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-silvv-overlay-in"
           onClick={() => !savingMem && setShowMemForm(false)}
         >
           <form
             onSubmit={handleSaveMemoryEvent}
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-lg glass-elevated rounded-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto"
+            className="animate-silvv-modal-in w-full max-w-lg glass-elevated rounded-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto"
           >
             <div className="flex items-center justify-between">
               <h2 className="font-display text-lg font-semibold text-zinc-900 dark:text-zinc-50">
@@ -1718,11 +1724,11 @@ export function CalendarTasksView({
       {/* ==================== MODAL: MEMORY EVENT DETAIL ==================== */}
       {detailMemEvent && (
         <div
-          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
+                  className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-silvv-overlay-in"
           onClick={() => setDetailMemEvent(null)}
         >
           <div
-            className="w-full max-w-xl glass-elevated rounded-2xl p-6 space-y-4 max-h-[85vh] overflow-y-auto"
+            className="animate-silvv-modal-in w-full max-w-xl glass-elevated rounded-2xl p-6 space-y-4 max-h-[85vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-3">
@@ -1806,11 +1812,11 @@ export function CalendarTasksView({
       {/* ==================== MODAL: CONFIRM GOOGLE CALENDAR MUTATION ==================== */}
       {confirmModal && (
         <div
-          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
+                  className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-silvv-overlay-in"
           onClick={() => !executingConfirm && setConfirmModal(null)}
         >
           <div
-            className="w-full max-w-md glass-elevated rounded-2xl p-6 space-y-4"
+            className="animate-silvv-modal-in w-full max-w-md glass-elevated rounded-2xl p-6 space-y-4"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-3">

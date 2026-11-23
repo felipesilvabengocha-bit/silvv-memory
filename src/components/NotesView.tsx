@@ -1020,6 +1020,7 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
             <button
               type="button"
               onClick={() => setQuickOpen((value) => !value)}
+              aria-expanded={quickOpen}
               aria-pressed={quickOpen}
               className="inline-flex items-center gap-1.5 self-start sm:self-auto px-3.5 py-2 rounded-xl glass-panel text-xs font-medium text-zinc-800 dark:text-zinc-200 hover:border-violet-500/40 transition-colors cursor-pointer whitespace-nowrap shrink-0"
             >
@@ -1054,7 +1055,7 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
             e.preventDefault();
             if (quickText.trim()) void handleCreateNote(true, quickText);
           }}
-          className="glass-panel rounded-2xl p-4 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5"
+          className="glass-panel rounded-2xl p-4 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 animate-silvv-popover-in"
         >
           <input
             type="text"
@@ -1084,7 +1085,7 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
       )}
 
       {error && (
-        <div className="p-3.5 rounded-xl border border-red-300 dark:border-red-900/60 bg-red-50/80 dark:bg-red-950/30 text-sm text-red-700 dark:text-red-300 flex items-center justify-between gap-2">
+        <div className="p-3.5 rounded-xl border border-red-300 dark:border-red-900/60 bg-red-50/80 dark:bg-red-950/30 text-sm text-red-700 dark:text-red-300 flex items-center justify-between gap-2 animate-silvv-in">
           <span>{error}</span>
           <button type="button" onClick={() => setError(null)} className="cursor-pointer">
             <X className="w-4 h-4" />
@@ -1111,6 +1112,7 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
                 key={v.id}
                 type="button"
                 onClick={() => setFilterMode(v.id)}
+                aria-pressed={filterMode === v.id}
                 className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs cursor-pointer transition-colors ${
                   filterMode === v.id
                     ? 'bg-violet-600/15 text-violet-700 dark:text-violet-300 font-medium'
@@ -1137,7 +1139,7 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
             </div>
 
             {showNewFolder && (
-              <form onSubmit={handleCreateFolder} className="p-2 rounded-xl glass-subtle space-y-2">
+              <form onSubmit={handleCreateFolder} className="p-2 rounded-xl glass-subtle space-y-2 animate-silvv-popover-in">
                 <input
                   type="text"
                   value={newFolderName}
@@ -1251,7 +1253,7 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
               )}
             </div>
 
-            <div className="flex-1 overflow-y-auto divide-y divide-zinc-200/60 dark:divide-white/5">
+            <div className="silvv-stagger-list flex-1 overflow-y-auto divide-y divide-zinc-200/60 dark:divide-white/5">
               {loading ? (
                 <div className="p-4 space-y-3">
                   {[1, 2, 3].map((i) => (
@@ -1281,7 +1283,7 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
                         setEditorOpen(true);
                         setPreviewMode(false);
                       }}
-                      className={`w-full text-left px-4 py-3.5 transition-colors cursor-pointer space-y-1 ${
+                      className={`silvv-note-card w-full text-left px-4 py-3.5 transition-colors cursor-pointer space-y-1 ${
                         active
                           ? 'bg-violet-600/10 dark:bg-violet-500/15'
                           : 'hover:bg-zinc-100/70 dark:hover:bg-white/5'
@@ -1315,9 +1317,10 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
 
           {/* Note Editor / Detail */}
           <div
+            key={editorOpen ? activeNote?.id ?? 'empty' : 'preview'}
             className={
               editorOpen
-                ? 'h-full min-h-0 w-full glass-panel rounded-none border-0 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] sm:px-8 flex flex-col gap-4 overflow-hidden lg:animate-silvv-editor-in'
+                ? 'h-full min-h-0 w-full glass-panel rounded-none border-0 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] sm:px-8 flex flex-col gap-4 overflow-hidden animate-silvv-editor-in'
                 : 'xl:col-span-7 glass-panel rounded-2xl p-5 flex flex-col gap-4 min-h-[560px]'
             }
           >
@@ -1360,7 +1363,7 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
                             : 'Organización automática por IA'}
                       </span>
                       <span className="text-zinc-400 dark:text-zinc-500" aria-hidden="true">·</span>
-                      <span className="text-zinc-500 dark:text-zinc-400">
+                      <span aria-live="polite" className="text-zinc-500 dark:text-zinc-400">
                         {saveState === 'saving'
                           ? 'Guardando…'
                           : saveState === 'saved'
@@ -1481,7 +1484,7 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
                 </section>
 
                 {previewMode ? (
-                  <div className={`flex-1 ${editorOpen ? 'min-h-0' : 'min-h-[260px]'} p-4 rounded-xl glass-subtle overflow-y-auto`}>
+                  <div className={`animate-silvv-note-in flex-1 ${editorOpen ? 'min-h-0' : 'min-h-[260px]'} p-4 rounded-xl glass-subtle overflow-y-auto`}>
                     <MarkdownRenderer content={draftContent || '*Nota vacía.*'} />
                   </div>
                 ) : (
@@ -1490,7 +1493,7 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
                     value={draftContent}
                     onChange={(e) => setDraftContent(e.target.value)}
                     placeholder="Escribí libremente tus ideas, apuntes, borradores o listas (admite Markdown)..."
-                    className={`flex-1 ${editorOpen ? 'min-h-0 rounded-none border-0 bg-transparent p-1 focus:ring-0' : 'min-h-[260px] rounded-xl border border-zinc-200/80 dark:border-white/10 bg-white/60 dark:bg-black/25 p-4 focus:ring-2 focus:ring-violet-500/35'} w-full resize-none text-base sm:text-sm text-zinc-900 dark:text-zinc-100 leading-relaxed focus:outline-none`}
+                    className={`silvv-note-editor flex-1 ${editorOpen ? 'min-h-0 rounded-none border-0 bg-transparent p-1 focus:ring-0' : 'min-h-[260px] rounded-xl border border-zinc-200/80 dark:border-white/10 bg-white/60 dark:bg-black/25 p-4 focus:ring-2 focus:ring-violet-500/35'} w-full resize-none text-base sm:text-sm text-zinc-900 dark:text-zinc-100 leading-relaxed focus:outline-none`}
                   />
                 )}
 
