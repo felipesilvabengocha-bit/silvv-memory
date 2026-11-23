@@ -23,10 +23,12 @@ import {
   Moon,
   Search,
   Settings,
+  Sparkles,
   Sun,
   X,
 } from 'lucide-react';
 import { auth, clearGoogleAccessToken, subscribeToOrganizationChanges } from './lib/firebase';
+import type { PersonalInsightEvidence } from './lib/insight-types';
 import {
   apiRequest,
   type DashboardData,
@@ -51,6 +53,9 @@ const CalendarTasksView = lazy(() =>
 const SummariesView = lazy(() =>
   import('./components/SummariesView').then((module) => ({ default: module.SummariesView })),
 );
+const PersonalInsightsView = lazy(() =>
+  import('./components/PersonalInsightsView').then((module) => ({ default: module.PersonalInsightsView })),
+);
 const KnowledgeView = lazy(() =>
   import('./components/KnowledgeView').then((module) => ({ default: module.KnowledgeView })),
 );
@@ -67,13 +72,14 @@ const NAV_ITEMS: Array<{ id: NavTab; label: string; shortLabel: string; icon: ty
   { id: 'memory', label: 'Organización inteligente', shortLabel: 'Organizar', icon: Brain },
   { id: 'calendar', label: 'Agenda inteligente', shortLabel: 'Agenda', icon: Calendar },
   { id: 'summaries', label: 'Resúmenes', shortLabel: 'Resúmenes', icon: BookOpenText },
+  { id: 'insights', label: 'Insights personales', shortLabel: 'Insights', icon: Sparkles },
   { id: 'knowledge', label: 'Chat de conocimiento', shortLabel: 'Saber', icon: FileSearch },
   { id: 'agents', label: 'Mis agentes', shortLabel: 'Agentes', icon: Bot },
   { id: 'settings', label: 'Ajustes y papelera', shortLabel: 'Ajustes', icon: Settings },
 ];
 
-// 5 primary sections on iPhone / mobile fixed bottom navigation bar
-const MOBILE_PRIMARY_TABS: NavTab[] = ['chat', 'memory', 'calendar', 'summaries', 'dashboard'];
+// Primary sections on the mobile fixed bottom navigation bar
+const MOBILE_PRIMARY_TABS: NavTab[] = ['chat', 'memory', 'calendar', 'insights', 'summaries', 'dashboard'];
 
 const routeVariants = {
   enter: (direction: 'forward' | 'backward') => ({
@@ -323,6 +329,36 @@ export default function App() {
   const handleQuickSend = (text: string) => {
     setQuickChatText(text);
     handleNavigate('chat');
+  };
+
+  const handleOpenInsightSource = (evidence: PersonalInsightEvidence) => {
+    if (evidence.sourceType === 'message' && evidence.conversationId) {
+      const conversationId = Number(evidence.conversationId);
+      handleNavigate('chat', Number.isFinite(conversationId) ? conversationId : undefined);
+      return;
+    }
+    if (evidence.sourceType === 'knowledge_message') {
+      handleNavigate('knowledge');
+      return;
+    }
+    if (evidence.sourceType === 'agent_message' || evidence.sourceType === 'agent_memory') {
+      handleNavigate('agents');
+      return;
+    }
+    if (evidence.sourceType === 'note') {
+      handleNavigate('notes');
+      return;
+    }
+    if (evidence.sourceType === 'person') {
+      setOrganizationCategory('people');
+      handleNavigate('memory');
+      return;
+    }
+    if (evidence.sourceType === 'task' || evidence.sourceType === 'calendar_event') {
+      handleNavigate('calendar');
+      return;
+    }
+    handleNavigate('memory');
   };
 
   const handleSignOut = async () => {
@@ -666,6 +702,13 @@ export default function App() {
                 />
               )}
 
+              {activeTab === 'insights' && (
+                <PersonalInsightsView
+                  onQuickSend={handleQuickSend}
+                  onOpenSource={handleOpenInsightSource}
+                />
+              )}
+
               {activeTab === 'knowledge' && <KnowledgeView />}
 
               {activeTab === 'agents' && <AgentsView />}
@@ -694,7 +737,7 @@ export default function App() {
             aria-label="Navegación principal móvil"
             className={`${isFullBleedChat && mobileKeyboardOpen ? 'hidden' : 'lg:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-zinc-200/70 dark:border-white/10 glass-elevated pb-[env(safe-area-inset-bottom)]'}`}
           >
-            <div className="grid grid-cols-5">
+            <div className="grid grid-cols-6">
               {MOBILE_PRIMARY_TABS.map((tabId) => {
                 const item = NAV_ITEMS.find((n) => n.id === tabId)!;
                 const Icon = item.icon;

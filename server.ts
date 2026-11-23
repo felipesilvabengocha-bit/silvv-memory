@@ -19,6 +19,13 @@ import {
   queryKnowledgeBrain,
   runCustomAgentChat,
 } from './src/lib/gemini.ts';
+import {
+  askAboutPersonalInsight,
+  correctPersonalInsight,
+  getPersonalInsights,
+  refreshPersonalInsights,
+  updatePersonalInsight,
+} from './src/lib/personal-insights.ts';
 
 const PORT = Number(process.env.PORT || 3000);
 const IS_VERCEL = Boolean(process.env.VERCEL);
@@ -481,6 +488,76 @@ app.use(express.json({ limit: '45mb' }));
 
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true, service: 'silvv-memory', timestamp: new Date().toISOString() });
+  });
+
+  app.get('/api/insights', requireAuth, async (req: AuthRequest, res) => {
+    try {
+      res.json(await getPersonalInsights(req.user!.uid));
+    } catch (err) {
+      sendServerError(res, err, 'No se pudieron cargar tus Insights personales.');
+    }
+  });
+
+  app.post('/api/insights/refresh', requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const deep = req.body?.deep;
+      if (typeof deep !== 'undefined' && typeof deep !== 'boolean') {
+        return res.status(400).json({ error: 'El modo de análisis no es válido.' });
+      }
+      res.json(await refreshPersonalInsights(req.user!.uid, deep === true));
+    } catch (err) {
+      sendServerError(res, err, 'No se pudo actualizar el análisis de Insights.');
+    }
+  });
+
+  app.post('/api/insights/:insightId/question', requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const insightId = String(req.params.insightId || '');
+      const question = typeof req.body?.question === 'string' ? req.body.question : '';
+      if (!/^[a-f0-9]{24}$/.test(insightId)) {
+        return res.status(400).json({ error: 'El insight solicitado no es válido.' });
+      }
+      if (!question.trim() || question.length > 1000) {
+        return res.status(400).json({ error: 'La pregunta debe tener entre 1 y 1000 caracteres.' });
+      }
+      res.json(await askAboutPersonalInsight(req.user!.uid, insightId, question));
+    } catch (err) {
+      sendServerError(res, err, 'No se pudo responder sobre este insight.');
+    }
+  });
+
+  app.post('/api/insights/:insightId/correction', requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const insightId = String(req.params.insightId || '');
+      const correction = typeof req.body?.correction === 'string' ? req.body.correction : '';
+      if (!/^[a-f0-9]{24}$/.test(insightId)) {
+        return res.status(400).json({ error: 'El insight solicitado no es válido.' });
+      }
+      if (!correction.trim() || correction.length > 1000) {
+        return res.status(400).json({ error: 'La corrección debe tener entre 1 y 1000 caracteres.' });
+      }
+      res.json(await correctPersonalInsight(req.user!.uid, insightId, correction));
+    } catch (err) {
+      sendServerError(res, err, 'No se pudo guardar la corrección.');
+    }
+  });
+
+  app.patch('/api/insights/:insightId', requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const insightId = String(req.params.insightId || '');
+      if (!/^[a-f0-9]{24}$/.test(insightId)) {
+        return res.status(400).json({ error: 'El insight solicitado no es válido.' });
+      }
+      const patch: { isStarred?: boolean; dismissed?: boolean } = {};
+      if (typeof req.body?.isStarred === 'boolean') patch.isStarred = req.body.isStarred;
+      if (typeof req.body?.dismissed === 'boolean') patch.dismissed = req.body.dismissed;
+      if (Object.keys(patch).length === 0) {
+        return res.status(400).json({ error: 'No hay cambios válidos para guardar.' });
+      }
+      res.json(await updatePersonalInsight(req.user!.uid, insightId, patch));
+    } catch (err) {
+      sendServerError(res, err, 'No se pudo actualizar el insight.');
+    }
   });
 
   // =========================================================================
