@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { AnimatePresence, MotionConfig, motion } from 'motion/react';
 import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
 import {
   BookOpenText,
@@ -78,6 +79,20 @@ const NAV_ITEMS: Array<{ id: NavTab; label: string; shortLabel: string; icon: ty
 
 // 5 primary sections on iPhone / mobile fixed bottom navigation bar
 const MOBILE_PRIMARY_TABS: NavTab[] = ['chat', 'notes', 'memory', 'calendar', 'summaries'];
+
+const routeVariants = {
+  enter: (direction: 'forward' | 'backward') => ({
+    opacity: 0,
+    x: direction === 'forward' ? 16 : -16,
+    scale: 0.995,
+  }),
+  center: { opacity: 1, x: 0, scale: 1 },
+  exit: (direction: 'forward' | 'backward') => ({
+    opacity: 0,
+    x: direction === 'forward' ? -12 : 12,
+    scale: 0.997,
+  }),
+};
 
 class SilvvErrorBoundary extends Component<
   { children: ReactNode },
@@ -551,11 +566,17 @@ export default function App() {
               }
             >
               <Suspense fallback={<ViewLoadingState isFullBleed={isFullBleedChat} />}>
-                <div
-                  key={activeTab}
-                  data-direction={viewDirection}
-                  className={`silvv-view-transition ${isFullBleedChat ? 'h-full min-h-0' : ''}`}
-                >
+                <MotionConfig reducedMotion="user">
+                  <AnimatePresence initial={false} mode="wait" custom={viewDirection}>
+                    <motion.div
+                      key={activeTab}
+                      variants={routeVariants}
+                      initial="enter"
+                      animate="center"
+                      exit="exit"
+                      transition={{ type: 'spring', stiffness: 320, damping: 32, mass: 0.8 }}
+                      className={`silvv-view-transition ${isFullBleedChat ? 'h-full min-h-0' : ''}`}
+                    >
               {activeTab === 'dashboard' && (
                 <DashboardView
                   data={dashboardData}
@@ -632,7 +653,9 @@ export default function App() {
                   onDataChanged={loadWorkspace}
                 />
               )}
-                </div>
+                    </motion.div>
+                  </AnimatePresence>
+                </MotionConfig>
               </Suspense>
             </main>
           </div>

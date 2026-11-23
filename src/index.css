@@ -163,7 +163,11 @@
   animation: silvvFadeSlideUp var(--silvv-motion-standard) var(--silvv-motion-spring) both;
 }
 
-.silvv-view-transition,
+.silvv-view-transition {
+  backface-visibility: hidden;
+  transform-origin: top center;
+}
+
 .animate-silvv-view-in {
   animation: silvvPageEnter 420ms var(--silvv-motion-spring) both;
   backface-visibility: hidden;
@@ -332,16 +336,6 @@ select {
   background: rgba(113, 113, 122, 0.55);
 }
 
-@keyframes silvvPageEnterFromRight {
-  from { opacity: 0; transform: translate3d(14px, 0, 0) scale(0.995); }
-  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
-}
-
-@keyframes silvvPageEnterFromLeft {
-  from { opacity: 0; transform: translate3d(-14px, 0, 0) scale(0.995); }
-  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
-}
-
 @keyframes silvvPopoverEnter {
   from { opacity: 0; transform: translate3d(0, -5px, 0) scale(0.98); }
   to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
@@ -360,14 +354,6 @@ select {
 @keyframes silvvTypingPulse {
   0%, 60%, 100% { opacity: 0.35; transform: translateY(0); }
   30% { opacity: 1; transform: translateY(-2px); }
-}
-
-.silvv-view-transition[data-direction="forward"] {
-  animation-name: silvvPageEnterFromRight;
-}
-
-.silvv-view-transition[data-direction="backward"] {
-  animation-name: silvvPageEnterFromLeft;
 }
 
 .animate-silvv-popover-in {
