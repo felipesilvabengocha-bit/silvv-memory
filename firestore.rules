@@ -559,7 +559,7 @@ service cloud.firestore {
 
       match /smartFolders/{folderId} {
         allow get: if isOwner(userId) && isValidId(folderId) && (resource == null || existing().userUid == request.auth.uid);
-        allow list: if isOwner(userId) && resource.data.userUid == request.auth.uid;
+        allow list: if isOwner(userId);
         allow create: if isOwner(userId) && isValidId(folderId) && isValidSmartFolder(incoming())
           && incoming().id == folderId
           && incoming().createdAt == request.time && incoming().updatedAt == request.time;
