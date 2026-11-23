@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import { createPortal } from 'react-dom';
 import {
   Archive,
@@ -1049,39 +1050,48 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
         </>
       )}
 
-      {!editorOpen && quickOpen && (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (quickText.trim()) void handleCreateNote(true, quickText);
-          }}
-          className="glass-panel rounded-2xl p-4 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 animate-silvv-popover-in"
-        >
-          <input
-            type="text"
-            autoFocus
-            value={quickText}
-            onChange={(e) => setQuickText(e.target.value)}
-            placeholder="Escribí una nota rápida (Enter para guardar al instante)..."
-            className="flex-1 min-w-0 px-3.5 py-2 rounded-xl border border-zinc-200/80 dark:border-white/10 bg-white/70 dark:bg-black/30 text-base sm:text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
-          />
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={() => setQuickOpen(false)}
-              className="px-3 py-2 rounded-xl text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 cursor-pointer whitespace-nowrap"
+      {!editorOpen && (
+        <AnimatePresence initial={false}>
+          {quickOpen && (
+            <motion.form
+              key="quick-note-popover"
+              initial={{ opacity: 0, y: -8, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -6, scale: 0.98 }}
+              transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (quickText.trim()) void handleCreateNote(true, quickText);
+              }}
+              className="glass-panel rounded-2xl p-4 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5"
             >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={!quickText.trim() || creatingNote || loading}
-              className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white text-xs font-medium cursor-pointer whitespace-nowrap"
-            >
-              Guardar rápida
-            </button>
-          </div>
-        </form>
+              <input
+                type="text"
+                autoFocus
+                value={quickText}
+                onChange={(e) => setQuickText(e.target.value)}
+                placeholder="Escribí una nota rápida (Enter para guardar al instante)..."
+                className="flex-1 min-w-0 px-3.5 py-2 rounded-xl border border-zinc-200/80 dark:border-white/10 bg-white/70 dark:bg-black/30 text-base sm:text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+              />
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setQuickOpen(false)}
+                  className="px-3 py-2 rounded-xl text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 cursor-pointer whitespace-nowrap"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={!quickText.trim() || creatingNote || loading}
+                  className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white text-xs font-medium cursor-pointer whitespace-nowrap"
+                >
+                  Guardar rápida
+                </button>
+              </div>
+            </motion.form>
+          )}
+        </AnimatePresence>
       )}
 
       {error && (
@@ -1316,14 +1326,19 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
           )}
 
           {/* Note Editor / Detail */}
-          <div
-            key={editorOpen ? activeNote?.id ?? 'empty' : 'preview'}
-            className={
-              editorOpen
-                ? 'h-full min-h-0 w-full glass-panel rounded-none border-0 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] sm:px-8 flex flex-col gap-4 overflow-hidden animate-silvv-editor-in'
-                : 'xl:col-span-7 glass-panel rounded-2xl p-5 flex flex-col gap-4 min-h-[560px]'
-            }
-          >
+          <AnimatePresence initial={false}>
+            <motion.div
+              key={editorOpen ? activeNote?.id ?? 'empty' : 'preview'}
+              initial={{ opacity: 0, y: editorOpen ? 12 : 8, scale: editorOpen ? 0.985 : 0.99 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -8, scale: 0.99 }}
+              transition={{ type: 'spring', stiffness: 320, damping: 32, mass: 0.8 }}
+              className={
+                editorOpen
+                  ? 'h-full min-h-0 w-full glass-panel rounded-none border-0 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] sm:px-8 flex flex-col gap-4 overflow-hidden'
+                  : 'hidden xl:col-span-7 xl:flex glass-panel rounded-2xl p-5 flex-col gap-4 min-h-[560px]'
+              }
+            >
             {!editorOpen ? (
               <div className="hidden xl:flex flex-col m-auto text-center max-w-sm space-y-3 py-12">
                 <p className="font-display text-base font-medium text-zinc-900 dark:text-zinc-100">
@@ -1538,7 +1553,8 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
                 </div>
               </>
             )}
-          </div>
+            </motion.div>
+          </AnimatePresence>
         </div>
       </div>
 
