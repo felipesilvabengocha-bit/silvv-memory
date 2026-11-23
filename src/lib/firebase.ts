@@ -14,6 +14,8 @@ import {
   getDocFromServer,
   getFirestore,
   onSnapshot,
+  query,
+  where,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -168,7 +170,7 @@ export function subscribeToOrganizationChanges(
   const initialized = new Set<string>();
   const unsubscribeAll = collectionNames.map((collectionName) =>
     onSnapshot(
-      collection(db, 'users', uid, collectionName),
+      query(collection(db, 'users', uid, collectionName), where('userUid', '==', uid)),
       (snapshot) => {
         if (!initialized.has(collectionName)) {
           initialized.add(collectionName);
