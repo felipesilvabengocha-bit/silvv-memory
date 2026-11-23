@@ -19,7 +19,6 @@ import {
   FileSearch,
   LayoutDashboard,
   LogOut,
-  Menu,
   MessageSquare,
   Moon,
   Search,
@@ -442,15 +441,30 @@ export default function App() {
           </aside>
 
           {/* Mobile Slide Drawer */}
-          {mobileNavOpen && (
-            <div
-              className="fixed inset-0 z-50 lg:hidden bg-black/55 backdrop-blur-xs animate-silvv-overlay-in"
-              onClick={() => setMobileNavOpen(false)}
-            >
-              <aside
-                className="w-72 h-full glass-elevated border-r border-zinc-200/70 dark:border-white/10 p-5 flex flex-col justify-between animate-silvv-panel-in"
-                onClick={(e) => e.stopPropagation()}
-              >
+          <MotionConfig reducedMotion="user">
+            <AnimatePresence>
+              {mobileNavOpen && (
+                <motion.div
+                  key="mobile-navigation-backdrop"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.2, ease: 'easeOut' }}
+                  className="fixed inset-x-0 bottom-0 top-[calc(3.5rem+env(safe-area-inset-top))] z-50 lg:hidden bg-black/55 backdrop-blur-xs"
+                  onClick={() => setMobileNavOpen(false)}
+                >
+                  <motion.aside
+                    id="mobile-navigation-drawer"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="Navegación principal"
+                    initial={{ x: '-100%' }}
+                    animate={{ x: 0 }}
+                    exit={{ x: '-100%' }}
+                    transition={{ type: 'spring', stiffness: 380, damping: 38 }}
+                    className="w-72 h-full glass-elevated border-r border-zinc-200/70 dark:border-white/10 p-5 flex flex-col justify-between"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                 <div className="space-y-6 overflow-y-auto">
                   <div className="flex items-center justify-between">
                     <span className="font-display text-lg font-semibold whitespace-nowrap">
@@ -498,9 +512,11 @@ export default function App() {
                   <LogOut className="w-4 h-4" />
                   <span>Cerrar sesión</span>
                 </button>
-              </aside>
-            </div>
-          )}
+                  </motion.aside>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </MotionConfig>
 
           {/* Main Content Area */}
           <div
@@ -510,11 +526,29 @@ export default function App() {
               <div className="flex items-center gap-3 min-w-0">
                 <button
                   type="button"
-                  onClick={() => setMobileNavOpen(true)}
+                  onClick={() => setMobileNavOpen((open) => !open)}
+                  aria-expanded={mobileNavOpen}
+                  aria-controls="mobile-navigation-drawer"
+                  aria-label={mobileNavOpen ? 'Cerrar menú' : 'Abrir menú'}
                   className="lg:hidden min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl glass-subtle text-zinc-600 dark:text-zinc-300 cursor-pointer shrink-0"
-                  aria-label="Abrir menú"
                 >
-                  <Menu className="w-4 h-4" />
+                  <span className="relative h-4 w-4" aria-hidden="true">
+                    <motion.span
+                      className="absolute left-0 top-[3px] h-[1.5px] w-4 rounded-full bg-current"
+                      animate={{ y: mobileNavOpen ? 4 : 0, rotate: mobileNavOpen ? 45 : 0 }}
+                      transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+                    />
+                    <motion.span
+                      className="absolute left-0 top-[7px] h-[1.5px] w-4 rounded-full bg-current"
+                      animate={{ opacity: mobileNavOpen ? 0 : 1, scaleX: mobileNavOpen ? 0.4 : 1 }}
+                      transition={{ duration: 0.16, ease: 'easeOut' }}
+                    />
+                    <motion.span
+                      className="absolute left-0 top-[11px] h-[1.5px] w-4 rounded-full bg-current"
+                      animate={{ y: mobileNavOpen ? -4 : 0, rotate: mobileNavOpen ? -45 : 0 }}
+                      transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+                    />
+                  </span>
                 </button>
                 <div className="flex items-center gap-2 text-sm truncate">
                   <button
