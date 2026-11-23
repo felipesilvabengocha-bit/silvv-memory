@@ -371,7 +371,7 @@
         "id": { "type": "number" },
         "userUid": { "type": "string", "maxLength": 128 },
         "sourceEventId": { "type": "number" },
-        "targetType": { "type": "string", "enum": ["memory_event", "person", "project", "note", "file", "calendar_event"] },
+        "targetType": { "type": "string", "enum": ["memory", "memory_event", "person", "project", "note", "file", "calendar_event"] },
         "targetId": { "type": "number" },
         "targetLabel": { "type": "string", "maxLength": 200 },
         "relationKind": { "type": "string", "maxLength": 64 },

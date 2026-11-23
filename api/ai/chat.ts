@@ -156,6 +156,7 @@ export default async function handler(request: ApiRequest, response: ServerRespo
     relevantMemories: asArray(rawContext.relevantMemories),
     relevantNotes: asArray(rawContext.relevantNotes),
     relevantMemoryEvents: asArray(rawContext.relevantMemoryEvents),
+    knownPeople: asArray(rawContext.knownPeople),
     availableCategories: asArray(rawContext.availableCategories),
     pendingTasks: asArray(rawContext.pendingTasks),
     upcomingEvents: asArray(rawContext.upcomingEvents),

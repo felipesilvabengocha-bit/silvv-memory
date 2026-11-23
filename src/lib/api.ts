@@ -61,6 +61,17 @@ export interface FolderItem {
   updatedAt?: string;
 }
 
+export interface SmartFolderItem {
+  id: string;
+  name: string;
+  slug: string;
+  category: string;
+  description: string | null;
+  autoCreated: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ProjectObjective {
   id: string;
   title: string;
@@ -100,6 +111,7 @@ export interface MemoryItem {
   sourceConversationId?: number | null;
   sourceMessageId?: number | null;
   sourceFileId?: number | null;
+  smartFolderIds?: string[];
   createdAt: string;
 }
 
@@ -168,6 +180,8 @@ export interface CalendarEventItem {
   timezone: string;
   syncStatus: string;
   linkedMemoryEventId?: number | null;
+  sourceMemoryId?: number | null;
+  smartFolderIds?: string[];
 }
 
 export interface NoteFolderItem {
@@ -202,6 +216,7 @@ export interface NoteItem {
   attachments: NoteAttachment[];
   sourceConversationId: number | null;
   sourceMessageId: number | null;
+  smartFolderIds?: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -230,6 +245,7 @@ export interface MemoryEventItem {
   relatedNoteIds: number[];
   tags: string[];
   importance: number;
+  smartFolderIds?: string[];
   createdAt: string;
   updatedAt?: string;
 }
@@ -242,13 +258,15 @@ export interface PersonEntityItem {
   notes: string | null;
   mentionCount: number;
   lastMentionedAt: string | null;
+  photoUrl?: string | null;
+  smartFolderIds?: string[];
   createdAt: string;
 }
 
 export interface EventRelationItem {
   id: number;
   sourceEventId: number;
-  targetType: 'memory_event' | 'person' | 'project' | 'note' | 'file' | 'calendar_event';
+  targetType: 'memory' | 'memory_event' | 'person' | 'project' | 'note' | 'file' | 'calendar_event';
   targetId: number;
   targetLabel: string;
   relationKind: string;

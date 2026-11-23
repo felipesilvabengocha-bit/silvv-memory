@@ -338,7 +338,8 @@ export interface SilvvContextSnapshot {
   nowIso: string;
   activeProjects: Array<{ id: number; name: string; category: string | null; status: string }>;
   activeFolders: Array<{ id: number; parentId: number | null; name: string; category: string | null }>;
-  relevantMemories: Array<{ layer: string; originKind: string; category: string; content: string; createdAt: string }>;
+  relevantMemories: Array<{ id?: number; layer: string; originKind: string; category: string; content: string; createdAt: string }>;
+  knownPeople: Array<{ id: number; name: string; relationship: string | null; notes: string | null; lastMentionedAt: string | null }>;
   relevantNotes: Array<{ id: number; title: string; content: string; tags: string[]; folderName: string | null; updatedAt: string }>;
   relevantMemoryEvents: Array<{
     id: number;
@@ -360,6 +361,7 @@ export interface SilvvAnalysisResult {
   classifications: MessageClassification[];
   detectedCategory: string;
   classificationConfidence: number;
+  personMatches: Array<{ name: string; personId: number }>;
   suggestedParentFolderName: string;
   suggestedFolderName: string;
   extractedSummary: string;
@@ -402,6 +404,8 @@ export interface SilvvAnalysisResult {
     endAtIso: string;
     allDay: boolean;
     ambiguousReason: string;
+    relatedMemoryId?: number;
+    relatedMemoryIndex?: number;
   }>;
   proposedMemoryEvents: Array<{
     title: string;
@@ -414,6 +418,8 @@ export interface SilvvAnalysisResult {
     projectName: string;
     tags: string[];
     importance: number;
+    relatedMemoryId?: number;
+    relatedMemoryIndex?: number;
   }>;
   proposedNoteAction: {
     action: 'none' | 'create' | 'propose_edit';
@@ -600,7 +606,9 @@ export async function analyzeUniversalInput(params: {
     '  * "la semana pasada" / "el mes pasado" -> calcula fecha aproximada (datePrecision="approximate", dateLabel textual exacto).',
     '  * Si no es posible determinar ninguna fecha real -> eventDateIso="", datePrecision="unknown", dateLabel="Sin fecha precisa". NUNCA inventes fechas.',
     `  * Categorías válidas para proposedMemoryEvents: ${categoriesList.join(', ')}.`,
+    '- Relaciona cada proposedMemoryEvent con memoriesToSave solo cuando represente explícitamente el mismo hecho: usa relatedMemoryIndex como índice cero-based de memoriesToSave. Si hay exactamente una memoria nueva y un acontecimiento nuevo en el mismo mensaje y describen el mismo hecho, usa relatedMemoryIndex=0. Si se refiere explícitamente a un relevantMemory existente, usa su relatedMemoryId exacto; si no hay correspondencia clara, omite ambos campos.',
     '- AGENDA REAL (proposedEvents): ÚNICAMENTE compromisos, reuniones, entregas o citas FUTURAS (o eventos programados con fecha futura). NUNCA pongas experiencias pasadas ni anécdotas en proposedEvents.',
+    '- Si una cita se crea explícitamente a partir de un recuerdo relevante existente, devuelve su id exacto en relatedMemoryId; si se basa explícitamente en una memoriaToSave de este mensaje, devuelve su índice cero-based en relatedMemoryIndex. En otro caso omite ambos para no borrar eventos independientes por error.',
     '- TAREAS (proposedTasks): pendientes accionables, recordatorios o deadlines concretos.',
     '5. INTEGRACIÓN CON NOTAS (proposedNoteAction):',
     '- Tienes acceso a relevantNotes del usuario para leerlas, buscarlas, resumirlas y relacionarlas en reply.',
@@ -614,7 +622,10 @@ export async function analyzeUniversalInput(params: {
     '- originKind: "fact", "preference", "opinion", "idea", "decision", "commitment", "academic", "professional", "temporal".',
     '- No guardes saludos triviales ni duplicados de recuerdos ya presentes en relevantMemories.',
     '7. CARPETAS Y SUBCARPETAS:',
-    '- Reutiliza carpetas de activeFolders cuando encajen.',
+    '- Reutiliza carpetas de activeFolders cuando encajen; las memorias y notas pueden compartir carpetas temáticas y etiquetas sin duplicar registros.',
+    '8. IDENTIDAD DE PERSONAS:',
+    '- Devuelve personMatches con cada persona concreta nombrada en recuerdos o acontecimientos y el id del perfil existente solo cuando el contexto confirme claramente que es la misma persona.',
+    '- Si solo coincide el nombre, existen homónimos o no hay evidencia suficiente, usa personId=0 para no fusionar perfiles. Nunca inventes ids; solo puedes elegir ids listados en knownPeople.',
   ].join('\n');
 
   const contextBlock = JSON.stringify({
@@ -623,6 +634,7 @@ export async function analyzeUniversalInput(params: {
     relevantMemories: params.context.relevantMemories,
     relevantNotes: params.context.relevantNotes,
     relevantMemoryEvents: params.context.relevantMemoryEvents,
+    knownPeople: params.context.knownPeople,
     pendingTasks: params.context.pendingTasks,
     upcomingEvents: params.context.upcomingEvents,
     recentHistory: params.context.recentHistory,
@@ -685,6 +697,17 @@ export async function analyzeUniversalInput(params: {
               required: ['layer', 'originKind', 'category', 'content'],
             },
           },
+          personMatches: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                name: { type: Type.STRING },
+                personId: { type: Type.INTEGER },
+              },
+              required: ['name', 'personId'],
+            },
+          },
           proposedTasks: {
             type: Type.ARRAY,
             items: {
@@ -713,6 +736,8 @@ export async function analyzeUniversalInput(params: {
                 endAtIso: { type: Type.STRING },
                 allDay: { type: Type.BOOLEAN },
                 ambiguousReason: { type: Type.STRING },
+                relatedMemoryId: { type: Type.INTEGER },
+                relatedMemoryIndex: { type: Type.INTEGER },
               },
               required: ['title', 'startAtIso'],
             },
@@ -732,6 +757,8 @@ export async function analyzeUniversalInput(params: {
                 projectName: { type: Type.STRING },
                 tags: { type: Type.ARRAY, items: { type: Type.STRING } },
                 importance: { type: Type.INTEGER },
+                relatedMemoryId: { type: Type.INTEGER },
+                relatedMemoryIndex: { type: Type.INTEGER },
               },
               required: ['title', 'description', 'datePrecision', 'category'],
             },
@@ -769,6 +796,7 @@ export async function analyzeUniversalInput(params: {
           'classifications',
           'detectedCategory',
           'classificationConfidence',
+          'personMatches',
           'memoriesToSave',
           'proposedTasks',
           'proposedEvents',
@@ -820,6 +848,15 @@ export async function analyzeUniversalInput(params: {
     detectedCategory: parsed.detectedCategory || 'General',
     classificationConfidence:
       typeof parsed.classificationConfidence === 'number' ? parsed.classificationConfidence : 0.75,
+    personMatches: Array.isArray(parsed.personMatches)
+      ? parsed.personMatches
+          .filter((match) => typeof match?.name === 'string' && match.name.trim())
+          .map((match) => ({
+            name: match.name.trim().slice(0, 120),
+            personId: Number.isSafeInteger(match.personId) && match.personId > 0 ? match.personId : 0,
+          }))
+          .slice(0, 40)
+      : [],
     suggestedParentFolderName: parsed.suggestedParentFolderName || '',
     suggestedFolderName: parsed.suggestedFolderName || 'General',
     extractedSummary: parsed.extractedSummary || '',
@@ -827,7 +864,17 @@ export async function analyzeUniversalInput(params: {
     memoriesToSave: Array.isArray(parsed.memoriesToSave) ? parsed.memoriesToSave : [],
     proposedTasks: Array.isArray(parsed.proposedTasks) ? parsed.proposedTasks : [],
     proposedEvents: Array.isArray(parsed.proposedEvents) ? parsed.proposedEvents : [],
-    proposedMemoryEvents: Array.isArray(parsed.proposedMemoryEvents) ? parsed.proposedMemoryEvents : [],
+    proposedMemoryEvents: Array.isArray(parsed.proposedMemoryEvents)
+      ? parsed.proposedMemoryEvents.map((event) => ({
+          ...event,
+          relatedMemoryId: typeof event.relatedMemoryId === 'number' && Number.isSafeInteger(event.relatedMemoryId) && event.relatedMemoryId > 0
+            ? event.relatedMemoryId
+            : undefined,
+          relatedMemoryIndex: typeof event.relatedMemoryIndex === 'number' && Number.isSafeInteger(event.relatedMemoryIndex) && event.relatedMemoryIndex >= 0
+            ? event.relatedMemoryIndex
+            : undefined,
+        }))
+      : [],
     proposedNoteAction:
       parsed.proposedNoteAction && parsed.proposedNoteAction.action && parsed.proposedNoteAction.action !== 'none'
         ? {

@@ -83,6 +83,7 @@ export function CalendarTasksView({
   const [memPrecision, setMemPrecision] = useState<MemoryEventItem['datePrecision']>('day');
   const [memCat, setMemCat] = useState('Vida personal');
   const [memPeopleText, setMemPeopleText] = useState('');
+  const [memPersonIds, setMemPersonIds] = useState<number[]>([]);
   const [memProjectId, setMemProjectId] = useState<number | ''>('');
   const [linkedCalEventId, setLinkedCalEventId] = useState<number | null>(null);
   const [savingMem, setSavingMem] = useState(false);
@@ -148,6 +149,17 @@ export function CalendarTasksView({
     loadAll();
   }, []);
 
+  useEffect(() => {
+    const handleRemoteChange = (event: Event) => {
+      const collectionName = (event as CustomEvent<{ collectionName?: string }>).detail?.collectionName;
+      if (['calendarEvents', 'memoryEvents', 'peopleEntities', 'eventRelations'].includes(collectionName || '')) {
+        void loadAll();
+      }
+    };
+    window.addEventListener('silvv:organization-change', handleRemoteChange);
+    return () => window.removeEventListener('silvv:organization-change', handleRemoteChange);
+  }, []);
+
   // ---- AGENDA MEMORIA HANDLERS ----
   const openCreateMemModal = (prefill?: {
     title?: string;
@@ -163,12 +175,13 @@ export function CalendarTasksView({
     setMemPrecision(prefill?.eventDate ? 'day' : 'day');
     setMemCat(categories[0] || 'Vida personal');
     setMemPeopleText('');
+    setMemPersonIds([]);
     setMemProjectId('');
     setLinkedCalEventId(prefill?.linkedCalendarEventId ?? null);
     setShowMemForm(true);
   };
 
-  const openEditMemModal = (ev: MemoryEventItem) => {
+  const openEditMemModal = async (ev: MemoryEventItem) => {
     setEditingMemId(ev.id);
     setMemTitle(ev.title);
     setMemDesc(ev.description);
@@ -177,8 +190,15 @@ export function CalendarTasksView({
     setMemPrecision(ev.datePrecision);
     setMemCat(ev.category);
     setMemPeopleText((ev.people || []).join(', '));
+    setMemPersonIds([]);
     setMemProjectId(ev.projectId ?? '');
     setLinkedCalEventId(null);
+    try {
+      const eventLinks = await apiRequest<EventRelationItem[]>(`/api/event-relations?eventId=${ev.id}`);
+      setMemPersonIds(eventLinks.filter((link) => link.targetType === 'person').map((link) => link.targetId));
+    } catch {
+      setMemPersonIds([]);
+    }
     setShowMemForm(true);
   };
 
@@ -188,10 +208,12 @@ export function CalendarTasksView({
     setSavingMem(true);
     setError(null);
     try {
-      const peopleArr = memPeopleText
+      const typedPeople = memPeopleText
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean);
+      const selectedPeople = people.filter((person) => memPersonIds.includes(person.id)).map((person) => person.name);
+      const peopleArr = Array.from(new Set([...typedPeople, ...selectedPeople]));
       const isoDate =
         memPrecision === 'unknown' || !memDate.trim()
           ? null
@@ -205,6 +227,7 @@ export function CalendarTasksView({
         dateLabel: memDateLabel.trim() || (isoDate ? memDate.trim() : 'Sin fecha precisa'),
         category: memCat,
         people: peopleArr,
+        personIds: memPersonIds,
         projectId: memProjectId === '' ? null : Number(memProjectId),
         linkedCalendarEventId: linkedCalEventId ?? undefined,
       };
@@ -238,6 +261,7 @@ export function CalendarTasksView({
   };
 
   const handleDeleteMemoryEvent = async (id: number) => {
+    if (!window.confirm('¿Eliminar este acontecimiento? Solo se quitarán las relaciones explícitas y los eventos automáticos vinculados.')) return;
     try {
       await apiRequest(`/api/memory-events/${id}`, { method: 'DELETE' });
       setMemoryEvents((prev) => prev.filter((m) => m.id !== id));
@@ -441,16 +465,15 @@ export function CalendarTasksView({
   };
 
   const requestDeleteEvent = (ev: CalendarEventItem) => {
-    if (ev.externalProvider === 'google' && getGoogleAccessToken()) {
-      setConfirmModal({
-        action: 'delete',
-        eventId: ev.id,
-        title: 'Confirmar eliminación en Google Calendar',
-        description: `¿Seguro querés eliminar "${ev.title}" de SILVV MEMORY y de tu Google Calendar conectado?`,
-      });
-      return;
-    }
-    executeEventMutation('delete', ev.id);
+    const syncToGoogle = ev.externalProvider === 'google' && Boolean(getGoogleAccessToken());
+    setConfirmModal({
+      action: 'delete',
+      eventId: ev.id,
+      title: syncToGoogle ? 'Confirmar eliminación en Google Calendar' : 'Confirmar eliminación del evento',
+      description: syncToGoogle
+        ? `¿Seguro querés eliminar "${ev.title}" de SILVV MEMORY y de tu Google Calendar conectado?`
+        : `¿Seguro querés eliminar "${ev.title}" de SILVV MEMORY? Solo se actualizarán las relaciones vinculadas explícitamente.`,
+    });
   };
 
   const executeEventMutation = async (
@@ -1699,6 +1722,22 @@ export function CalendarTasksView({
                 placeholder="Cata, Martín, Sofía..."
                 className="w-full px-3 py-2 rounded-xl border border-zinc-200/80 dark:border-white/10 bg-white/80 dark:bg-black/30 text-xs"
               />
+              {people.length > 0 && (
+                <label className="mt-3 block text-xs text-zinc-500 dark:text-zinc-400">
+                  Vincular perfiles existentes (opcional; elegílos para distinguir homónimos)
+                  <select
+                    multiple
+                    aria-label="Vincular perfiles de personas existentes"
+                    value={memPersonIds.map(String)}
+                    onChange={(event) => setMemPersonIds(Array.from(event.target.selectedOptions, (option) => Number(option.value)))}
+                    className="mt-1 min-h-20 w-full rounded-xl border border-zinc-200/80 bg-white/80 px-3 py-2 text-xs text-zinc-800 dark:border-white/10 dark:bg-black/30 dark:text-zinc-200"
+                  >
+                    {people.map((person) => (
+                      <option key={person.id} value={person.id}>{person.name}{person.relationship ? ` · ${person.relationship}` : ''}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </div>
 
             <div className="flex justify-end gap-2 pt-2">

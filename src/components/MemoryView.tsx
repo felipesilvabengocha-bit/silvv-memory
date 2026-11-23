@@ -85,6 +85,15 @@ export function MemoryView({ onDataChanged, onGoToChat }: MemoryViewProps) {
     loadMemories();
   }, []);
 
+  useEffect(() => {
+    const handleRemoteChange = (event: Event) => {
+      const collectionName = (event as CustomEvent<{ collectionName?: string }>).detail?.collectionName;
+      if (['memories', 'smartFolders'].includes(collectionName || '')) void loadMemories();
+    };
+    window.addEventListener('silvv:organization-change', handleRemoteChange);
+    return () => window.removeEventListener('silvv:organization-change', handleRemoteChange);
+  }, []);
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newContent.trim()) return;
@@ -147,6 +156,7 @@ export function MemoryView({ onDataChanged, onGoToChat }: MemoryViewProps) {
   };
 
   const handleDelete = async (id: number) => {
+    if (!window.confirm('¿Eliminar este recuerdo y quitar sus referencias vinculadas?')) return;
     try {
       await apiRequest(`/api/memories/${id}`, { method: 'DELETE' });
       setMemories((prev) => prev.filter((m) => m.id !== id));
@@ -203,7 +213,7 @@ export function MemoryView({ onDataChanged, onGoToChat }: MemoryViewProps) {
             }`}
           >
             <Folder className="w-3.5 h-3.5" />
-            <span>Carpetas y archivos</span>
+            <span>Archivos</span>
           </button>
           <button
             type="button"

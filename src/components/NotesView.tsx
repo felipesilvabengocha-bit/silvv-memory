@@ -33,11 +33,13 @@ import {
   type NoteOrganization,
 } from '../lib/api';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { getNoteValidationMessage, isValidNoteDraft } from '../lib/note-validation';
 
 interface NotesViewProps {
   isActive: boolean;
   onDataChanged: () => void;
   onAskInChat?: (prompt: string) => void;
+  showFolderTree?: boolean;
 }
 
 type NoteFilterMode = 'all' | 'pinned' | 'quick' | 'archived';
@@ -277,7 +279,7 @@ function AttachmentThumb({
   );
 }
 
-export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewProps) {
+export function NotesView({ isActive, onDataChanged, onAskInChat, showFolderTree = true }: NotesViewProps) {
   const [notes, setNotes] = useState<NoteItem[]>([]);
   const [folders, setFolders] = useState<NoteFolderItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -296,6 +298,7 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
   const [draftContent, setDraftContent] = useState('');
   const [draftTagsText, setDraftTagsText] = useState('');
   const [draftFolderId, setDraftFolderId] = useState<number | null>(null);
+  const [isNewDraft, setIsNewDraft] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [uploadingAtt, setUploadingAtt] = useState(false);
@@ -317,6 +320,7 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
   const fileInputRef = useRef<HTMLInputElement>(null);
   const previewDialogRef = useRef<HTMLDivElement>(null);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savingDraftRef = useRef(false);
   const hydratingRef = useRef(false);
   const foldersRef = useRef<NoteFolderItem[]>([]);
   const foldersLoadedRef = useRef(false);
@@ -448,16 +452,47 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
   }, [searchQuery, isActive]);
 
   useEffect(() => {
+    const handleRemoteChange = (event: Event) => {
+      const collectionName = (event as CustomEvent<{ collectionName?: string }>).detail?.collectionName;
+      if (!isActive || !['notes', 'noteFolders'].includes(collectionName || '')) return;
+      if (collectionName === 'noteFolders') foldersLoadedRef.current = false;
+      void loadAll(searchQuery);
+    };
+    window.addEventListener('silvv:organization-change', handleRemoteChange);
+    return () => window.removeEventListener('silvv:organization-change', handleRemoteChange);
+  }, [isActive, searchQuery]);
+
+  useEffect(() => {
     foldersRef.current = folders;
   }, [folders]);
 
   const activeNote = useMemo(
-    () => notes.find((n) => n.id === selectedNoteId) || null,
-    [notes, selectedNoteId],
+    () =>
+      notes.find((note) => note.id === selectedNoteId) ||
+      (isNewDraft
+        ? ({
+            id: -1,
+            folderId: draftFolderId,
+            projectId: null,
+            title: draftTitle || 'Nota nueva',
+            content: draftContent,
+            tags: draftTagsText.split(',').map((tag) => tag.trim()).filter(Boolean),
+            isQuick: false,
+            isPinned: false,
+            isArchived: false,
+            attachments: [],
+            sourceConversationId: null,
+            sourceMessageId: null,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          } as NoteItem)
+        : null),
+    [notes, selectedNoteId, isNewDraft, draftFolderId, draftTitle, draftContent, draftTagsText],
   );
 
   // Sync draft state when switching selected note
   useEffect(() => {
+    if (isNewDraft) return;
     if (autoSaveTimerRef.current) {
       clearTimeout(autoSaveTimerRef.current);
       autoSaveTimerRef.current = null;
@@ -483,7 +518,7 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
 
   // Debounced auto-save
   useEffect(() => {
-    if (hydratingRef.current || !activeNote) return;
+    if (hydratingRef.current || !activeNote || isNewDraft) return;
 
     const parsedTags = draftTagsText
       .split(',')
@@ -533,14 +568,30 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
   }, [draftTitle, draftContent, draftTagsText, draftFolderId]);
 
   useEffect(() => {
-    if (!editorOpen || !activeNote || !draftContent.trim()) return;
-    const content = draftContent.trim();
+    if (!editorOpen || !activeNote || isNewDraft || !isValidNoteDraft(draftTitle, draftContent)) return;
+    const content = [draftTitle.trim(), draftContent.trim()].filter(Boolean).join('\n');
     const waitingForInitialTitle = activeNote.title === 'Generando título…';
     const alreadyOrganized =
+      !isNewDraft &&
       activeNote.folderId !== null &&
       getSmartCategoryForFolder(foldersRef.current, activeNote.folderId) !== null &&
       !waitingForInitialTitle;
-    if (content === activeNote.content.trim() && alreadyOrganized) return;
+    if (!isNewDraft && draftContent.trim() === activeNote.content.trim() && alreadyOrganized) {
+      if (!activeNote.smartFolderIds?.length && activeNote.id > 0) {
+        const folderName = activeNote.folderId === null
+          ? activeNote.title
+          : foldersRef.current.find((folder) => folder.id === activeNote.folderId)?.name || activeNote.title;
+        void apiRequest<{ smartFolderIds: string[] }>('/api/smart-folders/assign', {
+          method: 'POST',
+          body: JSON.stringify({ recordType: 'note', recordId: activeNote.id, name: folderName }),
+        }).then((result) => {
+          setNotes((previous) => previous.map((note) => note.id === activeNote.id
+            ? { ...note, smartFolderIds: result.smartFolderIds }
+            : note));
+        }).catch(() => {});
+      }
+      return;
+    }
 
     let cancelled = false;
     const timer = setTimeout(async () => {
@@ -564,6 +615,20 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
         setDraftTitle(organization.title);
         setDraftTagsText(organization.tags.join(', '));
         setDraftFolderId(folderPath.folderId);
+        if (!isNewDraft && activeNote.id > 0) {
+          const assignment = await apiRequest<{ smartFolderIds: string[] }>('/api/smart-folders/assign', {
+            method: 'POST',
+            body: JSON.stringify({
+              recordType: 'note',
+              recordId: activeNote.id,
+              name: organization.subfolderName || organization.category,
+              category: organization.category,
+            }),
+          });
+          setNotes((previous) => previous.map((note) => note.id === activeNote.id
+            ? { ...note, smartFolderIds: assignment.smartFolderIds }
+            : note));
+        }
       } catch (err) {
         if (!cancelled) {
           if (draftTitle === 'Generando título…') setDraftTitle('Nota nueva');
@@ -579,21 +644,130 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
       clearTimeout(timer);
       setOrganizingNote(false);
     };
-  }, [activeNote?.id, activeNote?.title, draftContent, editorOpen]);
+  }, [activeNote?.id, activeNote?.title, draftContent, draftTitle, editorOpen, isNewDraft]);
 
-  const handleCloseEditor = () => {
-    if (!activeNote) {
-      setEditorOpen(false);
-      return;
+  const saveNewDraft = async (draft = {
+    title: draftTitle,
+    content: draftContent,
+    folderId: draftFolderId,
+    tags: draftTagsText.split(',').map((tag) => tag.trim()).filter(Boolean),
+    isQuick: false,
+  }): Promise<boolean> => {
+    if (savingDraftRef.current) return false;
+    const content = draft.content.trim();
+    const typedTitle = draft.title.trim() === 'Generando título…' ? '' : draft.title.trim();
+    if (!isValidNoteDraft(typedTitle, content)) {
+      setError(getNoteValidationMessage());
+      return false;
     }
 
+    savingDraftRef.current = true;
+    setCreatingNote(true);
+    setSaveState('saving');
+    setError(null);
+    let title = typedTitle || content.split(/\\r?\\n/)[0]?.trim().slice(0, 200) || 'Nota nueva';
+    let folderId = draft.folderId;
+    let tags = draft.tags;
+    let smartFolderName = '';
+    let smartFolderCategory = '';
+
+    try {
+      const organizationText = [typedTitle, content].filter(Boolean).join('\\n');
+      try {
+        const organization = await apiRequest<NoteOrganization>('/api/ai/note-organization', {
+          method: 'POST',
+          body: JSON.stringify({ content: organizationText }),
+        });
+        const folderPath = await ensureSmartFolderPath(
+          foldersRef.current,
+          organization.category,
+          organization.subfolderName,
+        );
+        foldersRef.current = folderPath.folders;
+        setFolders(folderPath.folders);
+        title = organization.title;
+        folderId = folderPath.folderId;
+        tags = organization.tags;
+        smartFolderName = organization.subfolderName || organization.category;
+        smartFolderCategory = organization.category;
+      } catch {
+        const defaultRoot = foldersRef.current.find(
+          (folder) => folder.parentId === null && normalizeFolderName(folder.name) === normalizeFolderName('Vida diaria'),
+        );
+        folderId ??= defaultRoot?.id ?? null;
+      }
+
+      const created = await apiRequest<NoteItem>('/api/notes', {
+        method: 'POST',
+        body: JSON.stringify({
+          title,
+          content,
+          folderId,
+          tags,
+          isQuick: draft.isQuick,
+          smartFolderName: smartFolderName || undefined,
+          smartFolderCategory: smartFolderCategory || undefined,
+        }),
+      });
+      setNotes((previous) => [created, ...previous]);
+      setSelectedNoteId(created.id);
+      setIsNewDraft(false);
+      setDraftTitle(created.title);
+      setDraftContent(created.content);
+      setDraftTagsText((created.tags || []).join(', '));
+      setDraftFolderId(created.folderId);
+      setSaveState('saved');
+      onDataChanged();
+      return true;
+    } catch (err) {
+      setSaveState('idle');
+      setError(err instanceof Error ? err.message : 'No se pudo guardar la nota.');
+      return false;
+    } finally {
+      savingDraftRef.current = false;
+      setCreatingNote(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isNewDraft || !editorOpen || !isValidNoteDraft(draftTitle, draftContent)) return;
+    const timer = window.setTimeout(() => void saveNewDraft(), 900);
+    return () => window.clearTimeout(timer);
+  }, [isNewDraft, editorOpen, draftTitle, draftContent]);
+
+  const handleCloseEditor = () => {
     if (autoSaveTimerRef.current) {
       clearTimeout(autoSaveTimerRef.current);
       autoSaveTimerRef.current = null;
     }
 
+    if (isNewDraft) {
+      if (isValidNoteDraft(draftTitle, draftContent)) {
+        const shouldSave = window.confirm('Tenés una nota sin guardar. ¿Querés guardarla? Elegí No para descartarla.');
+        if (shouldSave) {
+          void saveNewDraft().then((saved) => {
+            if (saved) setEditorOpen(false);
+          });
+          return;
+        }
+      }
+      setIsNewDraft(false);
+      setEditorOpen(false);
+      setDraftTitle('');
+      setDraftContent('');
+      setDraftTagsText('');
+      return;
+    }
+
+    if (!activeNote) {
+      setEditorOpen(false);
+      return;
+    }
+
     const parsedTags = draftTagsText.split(',').map((tag) => tag.trim()).filter(Boolean);
-    const titleToSave = draftContent.trim() ? draftTitle.trim() || 'Nota nueva' : 'Nueva nota';
+    const titleToSave = draftTitle.trim() === 'Generando título…'
+      ? ''
+      : draftTitle.trim() || (draftContent.trim() ? 'Nota nueva' : '');
     const originalTags = activeNote.tags || [];
     const contentChanged = draftContent !== activeNote.content;
     const changed =
@@ -627,52 +801,53 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
 
   const handleCreateNote = async (isQuick = false, customText?: string) => {
     if (creatingNote) return;
-    setCreatingNote(true);
-    setError(null);
-    try {
-      const content = isQuick ? (customText || '').trim() : '';
-      const selectedFolder =
-        typeof selectedFolderId === 'number'
-          ? foldersRef.current.find((folder) => folder.id === selectedFolderId)
-          : undefined;
-      const selectedCategory =
-        typeof selectedFolderId === 'number'
-          ? getSmartCategoryForFolder(foldersRef.current, selectedFolderId)
-          : null;
-      const defaultCategory = selectedCategory || 'Vida diaria';
-      const existingRoot = foldersRef.current.find(
-        (folder) =>
-          folder.parentId == null &&
-          normalizeFolderName(folder.name) === normalizeFolderName(defaultCategory),
-      );
-      const folderId = selectedCategory && selectedFolder ? selectedFolder.id : existingRoot?.id ?? null;
+    const selectedFolder =
+      typeof selectedFolderId === 'number'
+        ? foldersRef.current.find((folder) => folder.id === selectedFolderId)
+        : undefined;
+    const selectedCategory =
+      typeof selectedFolderId === 'number'
+        ? getSmartCategoryForFolder(foldersRef.current, selectedFolderId)
+        : null;
+    const defaultCategory = selectedCategory || 'Vida diaria';
+    const existingRoot = foldersRef.current.find(
+      (folder) =>
+        folder.parentId == null &&
+        normalizeFolderName(folder.name) === normalizeFolderName(defaultCategory),
+    );
+    const folderId = selectedCategory && selectedFolder ? selectedFolder.id : existingRoot?.id ?? null;
 
-      const title = 'Generando título…';
-      const created = await apiRequest<NoteItem>('/api/notes', {
-        method: 'POST',
-        body: JSON.stringify({
-          title,
-          content,
-          folderId,
-          tags: selectedTag ? [selectedTag] : [],
-          isQuick,
-        }),
+    if (isQuick) {
+      const content = (customText || '').trim();
+      if (!isValidNoteDraft('', content)) {
+        setError(getNoteValidationMessage());
+        return;
+      }
+      setError(null);
+      const saved = await saveNewDraft({
+        title: '',
+        content,
+        folderId,
+        tags: selectedTag ? [selectedTag] : [],
+        isQuick: true,
       });
-      setNotes((prev) => [created, ...prev]);
-      setSelectedNoteId(created.id);
-      setEditorOpen(true);
-      setPreviewMode(false);
-      if (filterMode === 'archived') setFilterMode('all');
-      if (isQuick) {
+      if (saved) {
         setQuickText('');
         setQuickOpen(false);
       }
-      onDataChanged();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo crear la nota.');
-    } finally {
-      setCreatingNote(false);
+      return;
     }
+
+    setError(null);
+    setIsNewDraft(true);
+    setSelectedNoteId(null);
+    setDraftTitle('');
+    setDraftContent('');
+    setDraftTagsText(selectedTag || '');
+    setDraftFolderId(folderId);
+    setPreviewMode(false);
+    setEditorOpen(true);
+    if (filterMode === 'archived') setFilterMode('all');
   };
 
   const handleTogglePin = async (note: NoteItem) => {
@@ -703,11 +878,13 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
   };
 
   const handleDeleteNote = async (id: number) => {
+    if (!window.confirm('¿Eliminar esta nota y quitar sus referencias vinculadas?')) return;
     try {
       await apiRequest(`/api/notes/${id}`, { method: 'DELETE' });
       const remaining = notes.filter((n) => n.id !== id);
       setNotes(remaining);
       if (selectedNoteId === id) {
+        setIsNewDraft(false);
         setSelectedNoteId(remaining[0]?.id ?? null);
         setEditorOpen(false);
       }
@@ -1135,7 +1312,7 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
             ))}
           </div>
 
-          <div className="space-y-1.5 pt-3 border-t border-zinc-200/70 dark:border-white/10">
+          <div className={showFolderTree ? 'space-y-1.5 pt-3 border-t border-zinc-200/70 dark:border-white/10' : 'hidden'}>
             <div className="flex items-center justify-between px-2">
               <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Carpetas</p>
               <button
@@ -1290,6 +1467,7 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
                       type="button"
                       onClick={() => {
                         setSelectedNoteId(n.id);
+                        setIsNewDraft(false);
                         setEditorOpen(true);
                         setPreviewMode(false);
                       }}
@@ -1379,15 +1557,17 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
                       </span>
                       <span className="text-zinc-400 dark:text-zinc-500" aria-hidden="true">·</span>
                       <span aria-live="polite" className="text-zinc-500 dark:text-zinc-400">
-                        {saveState === 'saving'
-                          ? 'Guardando…'
-                          : saveState === 'saved'
-                            ? 'Guardado automáticamente'
-                            : 'Sincronizado'}
+                        {isNewDraft
+                          ? isValidNoteDraft(draftTitle, draftContent) ? 'Borrador sin guardar' : 'No se guarda hasta que tenga contenido'
+                          : saveState === 'saving'
+                            ? 'Guardando…'
+                            : saveState === 'saved'
+                              ? 'Guardado automáticamente'
+                              : 'Sincronizado'}
                       </span>
                     </div>
                     <p className="mt-0.5 text-[11px] text-zinc-500 dark:text-zinc-400 tabular-nums">
-                      Creada {formatDate(activeNote.createdAt)} · Actualizada {formatDate(activeNote.updatedAt)}
+                      {isNewDraft ? 'Todavía no está guardada en tu cuenta' : `Creada ${formatDate(activeNote.createdAt)} · Actualizada ${formatDate(activeNote.updatedAt)}`}
                     </p>
                   </div>
                 </div>
@@ -1401,7 +1581,7 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
                       {previewMode ? <Edit3 className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                       <span>{previewMode ? 'Editar' : 'Vista previa'}</span>
                     </button>
-                    {onAskInChat && (
+                    {onAskInChat && !isNewDraft && (
                       <button
                         type="button"
                         onClick={() =>
@@ -1415,36 +1595,40 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
                         <MessageSquare className="w-3.5 h-3.5" />
                       </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => handleTogglePin(activeNote)}
-                      title={activeNote.isPinned ? 'Desfijar' : 'Fijar arriba'}
-                      className={`p-1.5 rounded-lg glass-subtle cursor-pointer ${
-                        activeNote.isPinned ? 'text-violet-500' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100'
-                      }`}
-                    >
-                      {activeNote.isPinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleToggleArchive(activeNote)}
-                      title={activeNote.isArchived ? 'Desarchivar' : 'Archivar'}
-                      className="p-1.5 rounded-lg glass-subtle text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 cursor-pointer"
-                    >
-                      {activeNote.isArchived ? (
-                        <ArchiveRestore className="w-3.5 h-3.5" />
-                      ) : (
-                        <Archive className="w-3.5 h-3.5" />
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteNote(activeNote.id)}
-                      title="Enviar a papelera"
-                      className="p-1.5 rounded-lg glass-subtle text-zinc-500 hover:text-red-500 cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {!isNewDraft && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleTogglePin(activeNote)}
+                          title={activeNote.isPinned ? 'Desfijar' : 'Fijar arriba'}
+                          className={`p-1.5 rounded-lg glass-subtle cursor-pointer ${
+                            activeNote.isPinned ? 'text-violet-500' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100'
+                          }`}
+                        >
+                          {activeNote.isPinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleArchive(activeNote)}
+                          title={activeNote.isArchived ? 'Desarchivar' : 'Archivar'}
+                          className="p-1.5 rounded-lg glass-subtle text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 cursor-pointer"
+                        >
+                          {activeNote.isArchived ? (
+                            <ArchiveRestore className="w-3.5 h-3.5" />
+                          ) : (
+                            <Archive className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteNote(activeNote.id)}
+                          title="Enviar a papelera"
+                          className="p-1.5 rounded-lg glass-subtle text-zinc-500 hover:text-red-500 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -1528,7 +1712,7 @@ export function NotesView({ isActive, onDataChanged, onAskInChat }: NotesViewPro
                     />
                     <button
                       type="button"
-                      disabled={uploadingAtt}
+                      disabled={uploadingAtt || isNewDraft}
                       onClick={() => fileInputRef.current?.click()}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl glass-subtle text-xs font-medium text-zinc-700 dark:text-zinc-200 hover:border-violet-500/40 cursor-pointer whitespace-nowrap"
                     >
