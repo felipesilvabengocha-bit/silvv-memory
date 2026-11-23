@@ -16,11 +16,11 @@ import type {
 const MODEL = 'anthropic/claude-sonnet-5.5';
 const STATE_COLLECTION = 'personalInsightsState';
 const STATE_DOCUMENT = 'current';
+const INSIGHTS_COLLECTION = 'personalInsights';
 const MAX_SOURCE_TEXT = 1800;
 const MAX_SOURCES_PER_BATCH = 80;
 const MAX_BATCH_INSIGHTS = 4;
 const MAX_FINAL_INSIGHTS = 12;
-const MAX_STORED_INSIGHTS = 60;
 
 interface InsightSource {
   key: string;
@@ -321,36 +321,82 @@ function emptyState(uid: string): StoredInsightState {
 }
 
 async function readState(uid: string): Promise<StoredInsightState> {
-  const snapshot = await adminDb
-    .collection('users')
-    .doc(uid)
-    .collection(STATE_COLLECTION)
-    .doc(STATE_DOCUMENT)
-    .get();
-  if (!snapshot.exists) return emptyState(uid);
-  const data = snapshot.data() as Partial<StoredInsightState> | undefined;
-  if (!data || data.userUid !== uid || !Array.isArray(data.insights)) return emptyState(uid);
+  const userRef = adminDb.collection('users').doc(uid);
+  const [metadataSnapshot, insightSnapshot] = await Promise.all([
+    userRef.collection(STATE_COLLECTION).doc(STATE_DOCUMENT).get(),
+    userRef.collection(INSIGHTS_COLLECTION).where('userUid', '==', uid).get(),
+  ]);
+  const metadata = metadataSnapshot.data();
+  const userMetadata = metadataSnapshot.exists && metadata?.userUid === uid ? metadata : null;
+  const storedInsights = insightSnapshot.docs
+    .filter((document) => document.data().userUid === uid)
+    .map((document) => {
+      const data = document.data();
+      return { ...data, id: typeof data.id === 'string' ? data.id : document.id } as PersonalInsight;
+    })
+    .filter((item) => typeof item.id === 'string' && Array.isArray(item.evidence));
+  const legacyInsights = Array.isArray(userMetadata?.insights)
+    ? userMetadata.insights.filter((item): item is PersonalInsight => Boolean(item && typeof item.id === 'string' && Array.isArray(item.evidence)))
+    : [];
+  const insightsById = new Map(legacyInsights.map((insight) => [insight.id, insight]));
+  for (const insight of storedInsights) insightsById.set(insight.id, insight);
+
   return {
     userUid: uid,
-    sourceFingerprints: asRecord(data.sourceFingerprints) as Record<string, string>,
-    insights: data.insights.filter((item): item is PersonalInsight => Boolean(item && typeof item.id === 'string' && Array.isArray(item.evidence))),
-    lastAnalyzedAt: typeof data.lastAnalyzedAt === 'string' ? data.lastAnalyzedAt : null,
+    sourceFingerprints: asRecord(userMetadata?.sourceFingerprints) as Record<string, string>,
+    insights: Array.from(insightsById.values()),
+    lastAnalyzedAt: typeof userMetadata?.lastAnalyzedAt === 'string' ? userMetadata.lastAnalyzedAt : null,
   };
 }
 
+function stableSerialize(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableSerialize).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableSerialize(record[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
 async function writeState(uid: string, state: StoredInsightState): Promise<void> {
-  await adminDb
-    .collection('users')
-    .doc(uid)
-    .collection(STATE_COLLECTION)
-    .doc(STATE_DOCUMENT)
-    .set({
-      userUid: uid,
-      sourceFingerprints: state.sourceFingerprints,
-      insights: state.insights.slice(0, MAX_STORED_INSIGHTS),
-      lastAnalyzedAt: state.lastAnalyzedAt,
-      updatedAt: new Date().toISOString(),
-    }, { merge: false });
+  const userRef = adminDb.collection('users').doc(uid);
+  const insightCollection = userRef.collection(INSIGHTS_COLLECTION);
+  const existingSnapshot = await insightCollection.where('userUid', '==', uid).get();
+  const existingById = new Map(existingSnapshot.docs
+    .filter((document) => document.data().userUid === uid)
+    .map((document) => [document.id, document.data()]));
+  const currentIds = new Set(state.insights.map((insight) => insight.id));
+  const changedInsights = state.insights.filter((insight) => {
+    const existing = existingById.get(insight.id);
+    return !existing || stableSerialize(existing) !== stableSerialize({ userUid: uid, ...insight });
+  });
+  const removedInsights = existingSnapshot.docs.filter((document) =>
+    document.data().userUid === uid && !currentIds.has(document.id),
+  );
+  const operations = [
+    ...changedInsights.map((insight) => ({
+      type: 'set' as const,
+      ref: insightCollection.doc(insight.id),
+      data: { userUid: uid, ...insight },
+    })),
+    ...removedInsights.map((document) => ({ type: 'delete' as const, ref: document.ref })),
+  ];
+
+  for (let offset = 0; offset < operations.length; offset += 450) {
+    const batch = adminDb.batch();
+    for (const operation of operations.slice(offset, offset + 450)) {
+      if (operation.type === 'set') batch.set(operation.ref, operation.data);
+      else batch.delete(operation.ref);
+    }
+    await batch.commit();
+  }
+
+  await userRef.collection(STATE_COLLECTION).doc(STATE_DOCUMENT).set({
+    userUid: uid,
+    sourceFingerprints: state.sourceFingerprints,
+    lastAnalyzedAt: state.lastAnalyzedAt,
+    updatedAt: new Date().toISOString(),
+  }, { merge: false });
 }
 
 function pruneUnsupportedInsights(
@@ -627,8 +673,7 @@ export async function refreshPersonalInsights(
       const prominenceRank = { high: 0, normal: 1, low: 2 };
       if (a.prominence !== b.prominence) return prominenceRank[a.prominence] - prominenceRank[b.prominence];
       return b.updatedAt.localeCompare(a.updatedAt);
-    })
-    .slice(0, MAX_STORED_INSIGHTS);
+    });
   const nextState: StoredInsightState = {
     userUid: uid,
     sourceFingerprints: snapshot.sourceFingerprints,
